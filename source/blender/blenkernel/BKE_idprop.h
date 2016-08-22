@@ -31,6 +31,7 @@
 #include "DNA_ID.h"
 
 #include "BLI_compiler_attrs.h"
+#include "BLI_ghash.h"
 
 struct IDProperty;
 struct ID;
@@ -96,6 +97,13 @@ void IDP_foreachIDLink(const ID *id, IDPWalkFunc walk, void *userData); /* Not u
 
 /* Calls IDP_UnlinkProperty on all IDProperty objects which refer to the given ID */
 void IDP_unlinkIDLinks(const ID *id);
+/* Restores LIB_FAKEUSER flag after append */
+void IDP_restore_fake_user(void);
+bool IDP_is_ID_used(const ID *id);
+
+typedef void(*IDPWalkFunc)(void *userData, IDProperty *idp);
+/* Calls a function on each IDProperty which references the given ID */
+void IDP_foreachIDLink(const ID *id, IDPWalkFunc walk, void *userData);
 
 /*-------- Group Functions -------*/
 

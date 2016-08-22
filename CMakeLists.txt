@@ -413,6 +413,9 @@ mark_as_advanced(WITH_CYCLES_NATIVE_ONLY)
 option(WITH_CUDA_DYNLOAD "Dynamically load CUDA libraries at runtime" ON)
 mark_as_advanced(WITH_CUDA_DYNLOAD)
 
+# V-Ray For Blender
+option(WITH_VRAY_FOR_BLENDER		"Enable V-Ray For Blender extentions" ON)
+
 # LLVM
 option(WITH_LLVM					"Use LLVM" OFF)
 if(APPLE)
@@ -590,6 +593,7 @@ if(APPLE)
 
 	message(STATUS "Detected OS X ${OSX_SYSTEM} and Xcode ${XCODE_VERSION} at ${XCODE_BUNDLE}")
 
+
 	if(${XCODE_VERSION} VERSION_LESS 4.3)
 		# use guaranteed existing sdk
 		set(CMAKE_OSX_SYSROOT /Developer/SDKs/MacOSX${OSX_SYSTEM}.sdk CACHE PATH "" FORCE)
@@ -600,12 +604,13 @@ if(APPLE)
 		set(OSX_SYSROOT_PREFIX ${XCODE_BUNDLE}/Contents/Developer/Platforms/MacOSX.platform)
 		message(STATUS "OSX_SYSROOT_PREFIX: " ${OSX_SYSROOT_PREFIX})
 		set(OSX_DEVELOPER_PREFIX /Developer/SDKs/MacOSX${OSX_SYSTEM}.sdk) # use guaranteed existing sdk
-		set(CMAKE_OSX_SYSROOT ${OSX_SYSROOT_PREFIX}/${OSX_DEVELOPER_PREFIX} CACHE PATH "" FORCE)
+		set(CMAKE_OSX_SYSROOT ${OSX_SYSROOT_PREFIX}/${OSX_DEVELOPER_PREFIX})
 		if(${CMAKE_GENERATOR} MATCHES "Xcode")
 			# to silence sdk not found warning, just overrides CMAKE_OSX_SYSROOT
 			set(CMAKE_XCODE_ATTRIBUTE_SDKROOT macosx${OSX_SYSTEM})
 		endif()
 	endif()
+
 
 	if(OSX_SYSTEM MATCHES 10.9)
 		# make sure syslibs and headers are looked up in sdk ( expecially for 10.9 openGL atm. )
@@ -614,9 +619,13 @@ if(APPLE)
 
 	if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
 		# 10.6 is our min. target, if you use higher sdk, weak linking happens
-		set(CMAKE_OSX_DEPLOYMENT_TARGET "10.6" CACHE STRING "" FORCE)
+		set(CMAKE_OSX_DEPLOYMENT_TARGET "10.9" CACHE STRING "" FORCE)
 	endif()
-	
+
+	if(OSX_SYSTEM VERSION_GREATER 10.9)
+		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++ -std=gnu++11")
+	endif()
+
 	if(NOT ${CMAKE_GENERATOR} MATCHES "Xcode")
 		# force CMAKE_OSX_DEPLOYMENT_TARGET for makefiles, will not work else ( cmake bug ? )
 		set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
@@ -763,6 +772,54 @@ endif()
 
 TEST_SHARED_PTR_SUPPORT()
 TEST_UNORDERED_MAP_SUPPORT()
+
+if(WITH_STATIC_LIBC)
+	set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc -static-libstdc++")
+endif()
+
+if(WITH_VRAY_FOR_BLENDER)
+	add_definitions(-DWITH_VRAY_FOR_BLENDER)
+
+	if(USE_BLENDER_VRAY_APPSDK)
+		string(TOLOWER "${CMAKE_HOST_SYSTEM_NAME}" APPSDK_HOST_SYSTEM_NAME)
+
+		set(APPSDK_VERSION "447" CACHE STRING "V-Ray AppSDK verstion")
+		set(APPSDK_PATH "$ENV{HOME}/src/appsdk_releases" CACHE PATH "V-Ray AppSDK location")
+		set(APPSDK_ROOT "${APPSDK_PATH}/${APPSDK_VERSION}/${APPSDK_HOST_SYSTEM_NAME}" CACHE PATH "V-Ray AppSDK root" FORCE)
+
+		find_library(VRAY_APPSDK_LIB
+			NAMES VRaySDKLibrary
+			PATHS ${APPSDK_ROOT}/lib  ${APPSDK_ROOT}/bin
+		)
+
+		if(NOT VRAY_APPSDK_LIB)
+			message(FATAL_ERROR "V-Ray AppSDK libraries are not found! Check APPSDK_PATH variable (current search path ${APPSDK_ROOT}/lib)")
+		else()
+			message(STATUS "Using V-Ray AppSDK: ${VRAY_APPSDK_LIB}")
+		endif()
+
+		add_definitions(-DUSE_BLENDER_VRAY_APPSDK)
+	endif()
+
+	if(USE_BLENDER_VRAY_ZMQ)
+		set(LIBS_ROOT "" CACHE PATH "ZMQ lib location")
+
+		if (UNIX)
+			set(JPEG ${LIBS_ROOT}/${CMAKE_SYSTEM_NAME}/jpeg-turbo)
+			set(JPEG_INCLUDE_DIR "${JPEG}/include")
+			set(JPEG_LIBPATH ${JPEG}/lib/Release)
+			set(JPEG_NAMES jpeg-turbo jpeg)
+			find_library(JPEG_TURBO_LIB REQUIRED PATHS ${JPEG_LIBPATH} NAMES ${JPEG_NAMES})
+		endif()
+
+		add_definitions(-DSODIUM_STATIC)
+		add_definitions(-DZMQ_STATIC)
+
+		if(NOT LIBS_ROOT)
+			message(FATAL_ERROR "V-Ray AppSDK require ZMQ and ZMQ wrapper to build")
+		endif()
+	endif()
+endif()
 
 if(WITH_AUDASPACE)
 	if(WITH_SYSTEM_AUDASPACE)
@@ -1701,6 +1758,7 @@ if(FIRST_RUN)
 	info_cfg_option(WITH_INPUT_NDOF)
 	info_cfg_option(WITH_CYCLES)
 	info_cfg_option(WITH_FREESTYLE)
+	info_cfg_option(WITH_VRAY_FOR_BLENDER)
 	info_cfg_option(WITH_OPENCOLORIO)
 	info_cfg_option(WITH_OPENVDB)
 	info_cfg_option(WITH_ALEMBIC)

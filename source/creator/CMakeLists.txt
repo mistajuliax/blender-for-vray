@@ -171,55 +171,71 @@ if(WITH_BUILDINFO)
 	# include the output directory, where the buildinfo.h file is generated
 	include_directories(${CMAKE_CURRENT_BINARY_DIR})
 
+	option(WITH_MANUAL_BUILDINFO "Build info header will be generated outside CMake" OFF)
+	if(WITH_MANUAL_BUILDINFO)
+		set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/buildinfo.h
+			PROPERTIES GENERATED TRUE
+			HEADER_FILE_ONLY TRUE)
 
-	# XXX, ${buildinfo_h_fake} is used here,
-	# because we rely on that file being detected as missing
-	# every build so that the real header "buildinfo.h" is updated.
-	#
-	# Keep this until we find a better way to resolve!
+		set(BUILDINFO_SRC
+			${CMAKE_CURRENT_BINARY_DIR}/buildinfo.h
+			buildinfo.c
+		)
 
-	set(buildinfo_h_real "${CMAKE_CURRENT_BINARY_DIR}/buildinfo.h")
-	set(buildinfo_h_fake "${CMAKE_CURRENT_BINARY_DIR}/buildinfo.h_fake")
+		list(APPEND SRC ${BUILDINFO_SRC})
 
-	if(EXISTS ${buildinfo_h_fake})
-		message(FATAL_ERROR "File \"${buildinfo_h_fake}\" found, this should never be created, remove!")
-	endif()
+		add_library(buildinfo    OBJECT ${BUILDINFO_SRC})
+		add_library(buildinfoobj OBJECT ${BUILDINFO_SRC})
+	else()
+		# XXX, "_buildinfo.h" is used twice here,
+		# because we rely on that file being detected as missing
+		# every build so that the real header "buildinfo.h" is updated.
+		#
+		# Keep this until we find a better way to resolve!
 
-	# a custom target that is always built
-	add_custom_target(buildinfo ALL
-		DEPENDS ${buildinfo_h_fake})
+		set(buildinfo_h_real "${CMAKE_CURRENT_BINARY_DIR}/buildinfo.h")
+		set(buildinfo_h_fake "${CMAKE_CURRENT_BINARY_DIR}/buildinfo.h_fake")
 
-	# creates buildinfo.h using cmake script
-	add_custom_command(
-		OUTPUT
-			${buildinfo_h_fake}  # ensure we always run
+		if(EXISTS ${buildinfo_h_fake})
+			message(FATAL_ERROR "File \"${buildinfo_h_fake}\" found, this should never be created, remove!")
+		endif()
+
+		# a custom target that is always built
+		add_custom_target(buildinfo ALL
+			DEPENDS ${buildinfo_h_fake})
+
+		# creates buildinfo.h using cmake script
+		add_custom_command(
+			OUTPUT
+				${buildinfo_h_fake}  # ensure we always run
+				${buildinfo_h_real}
+			COMMAND ${CMAKE_COMMAND}
+			-DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+			# overrides only used when non-empty strings
+			-DBUILD_DATE=${BUILDINFO_OVERRIDE_DATE}
+			-DBUILD_TIME=${BUILDINFO_OVERRIDE_TIME}
+			-P ${CMAKE_SOURCE_DIR}/build_files/cmake/buildinfo.cmake)
+
+		# buildinfo.h is a generated file
+		set_source_files_properties(
 			${buildinfo_h_real}
-		COMMAND ${CMAKE_COMMAND}
-		-DSOURCE_DIR=${CMAKE_SOURCE_DIR}
-		# overrides only used when non-empty strings
-		-DBUILD_DATE=${BUILDINFO_OVERRIDE_DATE}
-		-DBUILD_TIME=${BUILDINFO_OVERRIDE_TIME}
-		-P ${CMAKE_SOURCE_DIR}/build_files/cmake/buildinfo.cmake)
+			PROPERTIES GENERATED TRUE
+			HEADER_FILE_ONLY TRUE)
 
-	# buildinfo.h is a generated file
-	set_source_files_properties(
-		${buildinfo_h_real}
-		PROPERTIES GENERATED TRUE
-		HEADER_FILE_ONLY TRUE)
+		unset(buildinfo_h_real)
+		unset(buildinfo_h_fake)
 
-	unset(buildinfo_h_real)
-	unset(buildinfo_h_fake)
+		# add deps below, after adding blender
+		# -------------- done with header values.
 
-	# add deps below, after adding blender
-	# -------------- done with header values.
+		list(APPEND SRC
+			buildinfo.c
+		)
 
-	list(APPEND SRC
-		buildinfo.c
-	)
-
-	# make an object library so can load with it in tests
-	add_library(buildinfoobj OBJECT buildinfo.c)
-	add_dependencies(buildinfoobj buildinfo)
+		# make an object library so can load with it in tests
+		add_library(buildinfoobj OBJECT buildinfo.c)
+		add_dependencies(buildinfoobj buildinfo)
+	endif()
 endif()
 
 add_cc_flags_custom_test(blender)
@@ -335,7 +351,7 @@ install(
 
 if(WITH_PYTHON)
 	# install(CODE "message(\"copying blender scripts...\")")
-	
+
 	# exclude addons_contrib if release
 	if("${BLENDER_VERSION_CYCLE}" STREQUAL "release")
 		set(ADDON_EXCLUDE_CONDITIONAL "addons_contrib/*")
@@ -360,7 +376,7 @@ if(WITH_PYTHON)
 		PATTERN "${ADDON_EXCLUDE_CONDITIONAL}" EXCLUDE
 		PATTERN "${FREESTYLE_EXCLUDE_CONDITIONAL}" EXCLUDE
 	)
-	
+
 	unset(ADDON_EXCLUDE_CONDITIONAL)
 	unset(FREESTYLE_EXCLUDE_CONDITIONAL)
 endif()
@@ -640,7 +656,7 @@ if(UNIX AND NOT APPLE)
 				unset(_suffix)
 			endif()
 			unset(_target_LIB)
-			
+
 		endif()
 	endif()
 elseif(WIN32)
@@ -795,16 +811,16 @@ elseif(WIN32)
 			)
 		elseif(WITH_MINGW64)
 			install(
-				FILES 
+				FILES
 					${LIBDIR}/binaries/libgcc_s_sjlj-1.dll
 					${LIBDIR}/binaries/libwinpthread-1.dll
 					${LIBDIR}/binaries/libstdc++-6.dll
 				DESTINATION "."
 			)
-			
+
 			if(WITH_OPENMP)
 				install(
-					FILES 
+					FILES
 					${LIBDIR}/binaries/libgomp-1.dll
 					DESTINATION "."
 				)
@@ -876,7 +892,7 @@ elseif(WIN32)
 			)
 		endif()
 	endif()
-	
+
 	if(WITH_SYSTEM_AUDASPACE)
 		install(
 			FILES
@@ -893,7 +909,7 @@ elseif(WIN32)
 			DESTINATION "."
 		)
 	endif()
-		
+
 	install( # x86 builds can run on x64 Windows, so this is required at all times
 		FILES ${LIBDIR}/thumbhandler/lib/BlendThumb64.dll
 		DESTINATION "."
@@ -1042,7 +1058,7 @@ elseif(APPLE)
 		)
 		unset(_py_inc_suffix)
 	endif()
-	
+
 	# install blenderplayer bundle - copy of blender.app above. re-using macros et al
 	# note we are using OSX Bundle as base and copying Blender dummy bundle on top of it
 	if(WITH_GAMEENGINE AND WITH_PLAYER)
@@ -1138,6 +1154,8 @@ unset(BLENDER_TEXT_FILES_DESTINATION)
 add_dependencies(blender makesdna)
 
 setup_blender_sorted_libs()
+
+
 target_link_libraries(blender ${BLENDER_SORTED_LIBS})
 
 setup_liblinks(blender)

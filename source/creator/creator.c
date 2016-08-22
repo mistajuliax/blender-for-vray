@@ -66,7 +66,6 @@
 #include "BKE_particle.h"
 #include "BKE_idprop.h"
 
-
 #include "IMB_imbuf.h"  /* for IMB_init */
 
 #include "RE_engine.h"

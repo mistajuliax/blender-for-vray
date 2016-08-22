@@ -338,6 +338,7 @@ blender_include_dirs(
 	../../blenfont
 	../../blenkernel
 	../../blenlib
+	../../blenloader
 	../../bmesh
 	../../blentranslation
 	../../depsgraph

@@ -44,6 +44,7 @@
 #include "BLI_utildefines.h"
 #include "BLI_listbase.h"
 #include "BLI_math_vector.h"
+#include "BLI_callbacks.h"
 
 #include "BLT_translation.h"
 
@@ -474,6 +475,8 @@ static int new_material_exec(bContext *C, wmOperator *UNUSED(op))
 			ma->use_nodes = true;
 		}
 	}
+
+	BLI_callback_exec(NULL, &ma->id, BLI_CB_EVT_NEW_MATERIAL);
 
 	/* hook into UI */
 	UI_context_active_but_prop_get_templateID(C, &ptr, &prop);

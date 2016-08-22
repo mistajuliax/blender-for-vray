@@ -2163,6 +2163,14 @@ void RNA_def_property_poll_runtime(PropertyRNA *prop, void * const func)
 		fprintf(stderr, "%s: %s is not a Pointer Property.\n", __func__, prop->identifier);
 }
 
+void RNA_def_property_set_runtime(PropertyRNA *prop, void * const func)
+{
+	if (prop->type == PROP_POINTER)
+		((PointerPropertyRNA *)prop)->set = func;
+	else
+		fprintf(stderr, "%s: %s is not a Pointer Property.\n", __func__, prop->identifier);
+}
+
 void RNA_def_property_dynamic_array_funcs(PropertyRNA *prop, const char *getlength)
 {
 	if (!DefRNA.preprocess) {

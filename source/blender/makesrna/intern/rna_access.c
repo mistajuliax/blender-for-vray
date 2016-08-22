@@ -1200,7 +1200,7 @@ int RNA_property_pointer_poll(PointerRNA *ptr, PropertyRNA *prop, PointerRNA *va
 
 		if (pprop->poll) {
 			if (rna_idproperty_check(&prop, ptr))
-				return ((PropPointerPollFuncPy) pprop->poll)(ptr, *value, prop);
+				return ((PropPointerPollFuncPy) pprop->poll)(ptr, value, prop);
 			else
 				return pprop->poll(ptr, *value);
 		}
@@ -2915,21 +2915,27 @@ PointerRNA RNA_property_pointer_get(PointerRNA *ptr, PropertyRNA *prop)
 
 void RNA_property_pointer_set(PointerRNA *ptr, PropertyRNA *prop, PointerRNA ptr_value)
 {
+	IDProperty *idprop;
 	PointerPropertyRNA *pprop = (PointerPropertyRNA *) prop;
 	BLI_assert(RNA_property_type(prop) == PROP_POINTER);
 
-	/* Check types */
+	idprop = rna_idproperty_check(&prop, ptr);
+
+	if (idprop && pprop->set && !((PropPointerSetFuncPy)pprop->set)(ptr, &ptr_value, prop))
+		return;
+
 	if (ptr_value.type != NULL && !RNA_struct_is_a(ptr_value.type, pprop->type)) {
 		printf("%s: expected %s type, not %s.\n", __func__, pprop->type->identifier, ptr_value.type->identifier);
 		return;
 	}
 
-	if (pprop->set && !((prop->flag & PROP_NEVER_NULL) && ptr_value.data == NULL) &&
-		 !((prop->flag & PROP_ID_SELF_CHECK) && ptr->id.data == ptr_value.id.data)) {
+	if (!idprop && pprop->set &&
+		!((prop->flag & PROP_NEVER_NULL) && ptr_value.data == NULL) &&
+		!((prop->flag & PROP_ID_SELF_CHECK) && ptr->id.data == ptr_value.id.data))
+	{
 		pprop->set(ptr, ptr_value);
 	}
-
-	if (prop->flag & PROP_EDITABLE) {
+	else if (prop->flag & PROP_EDITABLE) {
 		IDPropertyTemplate val = { 0 };
 		IDProperty *group;
 
@@ -5766,7 +5772,7 @@ char *RNA_property_as_string(bContext *C, PointerRNA *ptr, PropertyRNA *prop, in
 		{
 			PointerRNA tptr = RNA_property_pointer_get(ptr, prop);
 			if (!tptr.data) break;
-
+			if (!tptr.type) goto unknown;
 			cstring = RNA_pointer_as_string(C, ptr, prop, &tptr);
 			BLI_dynstr_append(dynstr, cstring);
 			MEM_freeN(cstring);
@@ -5797,6 +5803,7 @@ char *RNA_property_as_string(bContext *C, PointerRNA *ptr, PropertyRNA *prop, in
 			BLI_dynstr_append(dynstr, "]");
 			break;
 		}
+		unknown:
 		default:
 			BLI_dynstr_append(dynstr, "'<UNKNOWN TYPE>'"); /* TODO */
 			break;

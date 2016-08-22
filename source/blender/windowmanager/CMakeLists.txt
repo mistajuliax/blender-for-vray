@@ -36,6 +36,7 @@ set(INC
 	../imbuf
 	../makesdna
 	../makesrna
+	../makesrna/intern
 	../nodes
 	../render/extern/include
 	../../gameengine/BlenderRoutines

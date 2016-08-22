@@ -68,6 +68,9 @@ static size_t idp_size_table[] = {
 	sizeof(double)
 };
 
+void IDP_ID_Register(IDProperty *prop);
+void IDP_ID_Unregister(IDProperty *prop);
+
 
 /* -------------------------------------------------------------------- */
 /* Array Functions */
@@ -448,7 +451,6 @@ void IDP_FreeString(IDProperty *prop)
 }
 /** \} */
 
-
 /* -------------------------------------------------------------------- */
 /* ID Type */
 
@@ -479,11 +481,56 @@ void IDP_exit(void)
 	BLI_spin_end(&HashTableLock);
 }
 
-static GSet *find_or_create_reflist(ID *id)
+void IDP_restore_fake_user(void)
 {
-	GSet *reflist = BLI_ghash_lookup(IDP_IDHashTable, id);
+	GHashIterator ghi;
+
+	BLI_spin_lock(&HashTableLock);
+
+	BLI_ghashIterator_init(&ghi, IDP_IDHashTable);
+	for (; !BLI_ghashIterator_done(&ghi); BLI_ghashIterator_step(&ghi)) {
+		ID *data = (ID*)BLI_ghashIterator_getKey(&ghi);
+		if (data) {
+			if (data->us == 0 || !(data->flag & LIB_FAKEUSER)) {
+				data->flag |= LIB_FAKEUSER;
+				id_us_min(data);
+			}
+		}
+	}
+
+	BLI_spin_unlock(&HashTableLock);
+	BLI_spin_end(&HashTableLock);
+}
+
+bool IDP_is_ID_used(const ID *id)
+{
+	bool used = false;
+	GHashIterator ghi;
+
+	BLI_spin_lock(&HashTableLock);
+
+	BLI_ghashIterator_init(&ghi, IDP_IDHashTable);
+	for (; !BLI_ghashIterator_done(&ghi); BLI_ghashIterator_step(&ghi)) {
+		ID *data = (ID*)BLI_ghashIterator_getKey(&ghi);
+		if (data) {
+			if (id == data) {
+				used = true;
+				break;
+			}
+		}
+	}
+
+	BLI_spin_unlock(&HashTableLock);
+	BLI_spin_end(&HashTableLock);
+
+	return used;
+}
+
+static GHash *find_or_create_reflist(ID *id)
+{
+	GHash *reflist = BLI_ghash_lookup(IDP_IDHashTable, id);
 	if (!reflist) {
-		reflist = BLI_gset_new(BLI_ghashutil_ptrhash, BLI_ghashutil_ptrcmp, __func__);
+		reflist = BLI_ghash_new(BLI_ghashutil_ptrhash, BLI_ghashutil_ptrcmp, __func__);
 		BLI_ghash_insert(IDP_IDHashTable, id, reflist);
 	}
 	return reflist;
@@ -491,68 +538,80 @@ static GSet *find_or_create_reflist(ID *id)
 
 void IDP_ID_Register(IDProperty *prop)
 {
-	GSet *reflist;
+	GHash *reflist;
 	ID *id;
 	int i;
 
 	switch (prop->type)
 	{
-		case IDP_ID:
-			id = IDP_Id(prop);
-			if (!id)
-				break;
+	case IDP_ID:
+		id = IDP_Id(prop);
+		if (!id) break;
 
-			BLI_spin_lock(&HashTableLock);
+		BLI_spin_trylock(&HashTableLock);
 
-			reflist = find_or_create_reflist(id);
-			BLI_gset_add(reflist, prop);
+		reflist = find_or_create_reflist(id);
+		BLI_ghash_insert(reflist, prop, prop);
 
-			BLI_spin_unlock(&HashTableLock);
-			break;
-		case IDP_IDPARRAY:
-			BLI_spin_lock(&HashTableLock);
+		BLI_spin_unlock(&HashTableLock);
+		break;
+	case IDP_IDPARRAY:
+		BLI_spin_trylock(&HashTableLock);
 
-			for (i = 0; i < prop->totallen; i++) {
-				IDProperty *inner = GETPROP(prop, i);
-				if (inner->type != IDP_ID) continue;
+		for (i = 0; i < prop->totallen; i++) {
+			IDProperty *inner = GETPROP(prop, i);
+			if (inner->type != IDP_ID) continue;
 
-				reflist = find_or_create_reflist(IDP_Id(inner));
-				BLI_gset_add(reflist, inner);
-			}
+			reflist = find_or_create_reflist(IDP_Id(inner));
+			BLI_ghash_insert(reflist, inner, inner);
+		}
 
-			BLI_spin_unlock(&HashTableLock);
-			break;
+		BLI_spin_unlock(&HashTableLock);
+		break;
 	}
 }
 
-static void IDP_ID_Unregister(IDProperty *prop)
+static void IDP_ID_RemoveFromHash(IDProperty *prop)
 {
-	GSet *reflist = 0;
+	ID *id = IDP_Id(prop);
+
+	GHash *reflist = BLI_ghash_lookup(IDP_IDHashTable, id);
+	if (reflist) {
+		BLI_ghash_remove(reflist, prop, NULL, NULL);
+
+		if (BLI_ghash_size(reflist) == 0) {
+			BLI_ghash_remove(IDP_IDHashTable, id, NULL, NULL);
+			BLI_ghash_free(reflist, NULL, NULL);
+		}
+	}
+}
+
+void IDP_ID_Unregister(IDProperty *prop)
+{
 	int i;
 
 	switch(prop->type) {
-		case IDP_ID:
-			if (IDP_Id(prop)) {
-				BLI_spin_lock(&HashTableLock);
+	case IDP_ID:
+		if (IDP_Id(prop)) {
+			BLI_spin_trylock(&HashTableLock);
 
-				reflist = BLI_ghash_lookup(IDP_IDHashTable, IDP_Id(prop));
-				if (reflist) BLI_gset_remove(reflist, prop, NULL);
-
-				BLI_spin_unlock(&HashTableLock);
-			}
-			break;
-		case IDP_IDPARRAY:
-			BLI_spin_lock(&HashTableLock);
-
-			for (i = 0; i < prop->totallen; i++) {
-				IDProperty *inner = GETPROP(prop, i);
-				if (inner->type != IDP_ID) continue;
-
-				reflist = BLI_ghash_lookup(IDP_IDHashTable, IDP_Id(inner));
-				if (reflist) BLI_gset_remove(reflist, inner, NULL);
-			}
+			IDP_ID_RemoveFromHash(prop);
 
 			BLI_spin_unlock(&HashTableLock);
+		}
+		break;
+	case IDP_IDPARRAY:
+		BLI_spin_trylock(&HashTableLock);
+
+		for (i = 0; i < prop->totallen; i++) {
+			IDProperty *inner = GETPROP(prop, i);
+			if (inner->type != IDP_ID)
+				continue;
+
+			IDP_ID_RemoveFromHash(inner);
+		}
+
+		BLI_spin_unlock(&HashTableLock);
 	}
 }
 
@@ -564,10 +623,16 @@ void IDP_foreachIDLink(const ID *id, IDPWalkFunc walk, void *userData)
 
 	users = BLI_ghash_lookup(IDP_IDHashTable, id);
 	if (users) {
-		GSetIterator iter;
-		GSET_ITER(iter, users) {
-			walk(userData, BLI_gsetIterator_getKey(&iter));
+		GHashIterator *iter;
+		IDProperty *idprop;
+		iter = BLI_ghashIterator_new(users);
+		while (!BLI_ghashIterator_done(iter)) {
+			idprop = BLI_ghashIterator_getValue(iter);
+			BLI_ghashIterator_step(iter);
+
+			walk(userData, idprop);
 		}
+		BLI_ghashIterator_free(iter);
 	}
 	BLI_spin_unlock(&HashTableLock);
 }
@@ -916,21 +981,21 @@ void IDP_RelinkProperty(struct IDProperty *prop)
 	loop = prop->data.group.first;
 	while (loop) {
 		switch (loop->type) {
-			case IDP_GROUP:
-				IDP_RelinkProperty(loop);
-				break;
-			case IDP_IDPARRAY:
-				idp_loop = IDP_Array(prop);
-				for (i = 0; i < prop->totallen; i++)
-					IDP_RelinkProperty(idp_loop[i]);
-				break;
-			case IDP_ID:
-				if (IDP_Id(loop) && IDP_Id(loop)->newid) {
-					IDP_ID_Unregister(loop);
-					loop->data.pointer = (void*)(IDP_Id(loop)->newid);
-					IDP_ID_Register(loop);
-				}
-				break;
+		case IDP_GROUP:
+			IDP_RelinkProperty(loop);
+			break;
+		case IDP_IDPARRAY:
+			idp_loop = IDP_Array(prop);
+			for (i = 0; i < prop->totallen; i++)
+				IDP_RelinkProperty(idp_loop[i]);
+			break;
+		case IDP_ID:
+			if (IDP_Id(loop) && IDP_Id(loop)->newid) {
+				IDP_ID_Unregister(loop);
+				loop->data.pointer = IDP_Id(loop)->newid;
+				IDP_ID_Register(loop);
+			}
+			break;
 		}
 		loop = loop->next;
 	}
@@ -1209,6 +1274,47 @@ void IDP_ClearProperty(IDProperty *prop)
 	prop->len = prop->totallen = 0;
 }
 
+// Group functions were removed by Campbell Barton:
+//   4b3f1b7540c43999b94c5147eabd6b0b7a6693f8 Cleanup: remove rarely used IDProp iterator
+// Restoring them here for further investigation if they are needed for
+// IDProperty patch
+//
+
+typedef struct IDPIter {
+	void *next;
+	IDProperty *parent;
+} IDPIter;
+
+static void *IDP_GetGroupIterator(IDProperty *prop)
+{
+	IDPIter *iter;
+
+	BLI_assert(prop->type == IDP_GROUP);
+	iter = MEM_mallocN(sizeof(IDPIter), "IDPIter");
+	iter->next = prop->data.group.first;
+	iter->parent = prop;
+	return (void *) iter;
+}
+
+static IDProperty *IDP_GroupIterNext(void *vself)
+{
+	IDPIter *self = (IDPIter *) vself;
+	Link *next = (Link *) self->next;
+	if (self->next == NULL) {
+		MEM_freeN(self);
+		return NULL;
+	}
+
+	self->next = next->next;
+	return (void *) next;
+}
+
+static void IDP_FreeIterBeforeEnd(void *vself)
+{
+	MEM_freeN(vself);
+}
+
+
 /**
  * Unlinks any struct IDProperty<->ID linkage that might be going on.
  */
@@ -1216,25 +1322,27 @@ void IDP_UnlinkProperty(IDProperty *prop)
 {
 	int i;
 	IDProperty *idp_loop;
+	void *idp_iter;
 
 	if (!prop) return;
 
 	switch (prop->type) {
-		case IDP_ID:
-			IDP_ID_Unregister(prop);
-			prop->data.pointer = NULL;
-			break;
-		case IDP_IDPARRAY:
-			idp_loop = IDP_Array(prop);
-			for (i = 0; i < prop->totallen; i++) {
-				IDP_UnlinkProperty(&(idp_loop[i]));
-			}
-			break;
-		case IDP_GROUP:
-			for (idp_loop = prop->data.group.first; idp_loop; idp_loop = idp_loop->next) {
-				IDP_UnlinkProperty(idp_loop);
-			}
-			break;
+	case IDP_ID:
+		IDP_ID_Unregister(prop);
+		prop->data.pointer = NULL;
+		break;
+	case IDP_IDPARRAY:
+		idp_loop = IDP_Array(prop);
+		for (i = 0; i < prop->totallen; i++) {
+			IDP_UnlinkProperty(&(idp_loop[i]));
+		}
+		break;
+	case IDP_GROUP:
+		idp_iter = IDP_GetGroupIterator(prop);
+		while ((idp_loop = IDP_GroupIterNext(idp_iter)) != NULL) {
+			IDP_UnlinkProperty(idp_loop);
+		}
+		break;
 	}
 }
 

@@ -51,6 +51,7 @@
 #include "BLI_listbase.h"
 #include "BLI_path_util.h"
 #include "BLI_utildefines.h"
+#include "BLI_callbacks.h"
 
 #include "BLT_translation.h"
 
@@ -73,6 +74,9 @@
 #include "NOD_composite.h"
 #include "NOD_shader.h"
 #include "NOD_texture.h"
+
+#include "../windowmanager/WM_api.h"
+#include "../windowmanager/WM_types.h"
 
 #define NODE_DEFAULT_MAX_WIDTH 700
 
@@ -3052,6 +3056,23 @@ void ntreeUpdateTree(Main *bmain, bNodeTree *ntree)
 		ntree_validate_links(ntree);
 	}
 	
+	if (ntree->update & (NTREE_UPDATE_LINKS | NTREE_UPDATE_NODES)) {
+		if (ntree->type == NTREE_CUSTOM) {
+			if (ntree->typeinfo->flags & NTREE_FLAG_PREVIEW) {
+				WM_main_add_notifier(NC_WORLD    | ND_SHADING_PREVIEW, NULL);
+				WM_main_add_notifier(NC_MATERIAL | ND_SHADING_PREVIEW, NULL);
+			}
+			if (ntree->typeinfo->flags & NTREE_FLAG_EVENT) {
+				BLI_callback_exec(NULL, &ntree->id, BLI_CB_EVT_NTREE_UPDATE);
+			}
+
+			// Tag update for ID.is_updated()
+			ntree->id.flag |= LIB_TAG_ID_RECALC;
+
+			WM_main_add_notifier(ND_DRAW_RENDER_VIEWPORT, NULL);
+		}
+	}
+
 	/* clear update flags */
 	for (node = ntree->nodes.first; node; node = node->next) {
 		node->update = 0;

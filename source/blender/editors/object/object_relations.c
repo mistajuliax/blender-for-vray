@@ -1934,7 +1934,6 @@ static void single_obdata_users(Main *bmain, Scene *scene, const int flag)
 
 				id_us_min(id);
 				id->newid = ob->data;
-
 				IDP_RelinkProperty(id->newid->properties);
 			}
 		}
@@ -2109,6 +2108,7 @@ void ED_object_single_users(Main *bmain, Scene *scene, const bool full, const bo
 		single_tex_users_expand(bmain);
 	}
 
+	BKE_scene_relink(scene);
 	BKE_main_id_clear_newpoins(bmain);
 	DAG_relations_tag_update(bmain);
 }

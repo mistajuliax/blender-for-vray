@@ -1222,6 +1222,7 @@ void ED_preview_shader_job(const bContext *C, void *owner, ID *id, ID *parent, M
 	wmJob *wm_job;
 	ShaderPreview *sp;
 	Scene *scene = CTX_data_scene(C);
+	RenderEngineType *et = RE_engines_find(scene->r.engine);
 	short id_type = GS(id->name);
 	bool use_new_shading = BKE_scene_use_new_shading_nodes(scene);
 
@@ -1247,9 +1248,13 @@ void ED_preview_shader_job(const bContext *C, void *owner, ID *id, ID *parent, M
 	sp->slot = slot;
 	sp->bmain = CTX_data_main(C);
 
-	/* hardcoded preview .blend for cycles/internal, this should be solved
-	 * once with custom preview .blend path for external engines */
-	if ((method != PR_NODE_RENDER) && id_type != ID_TE && use_new_shading) {
+	if (et && et->render && *et->preview_filepath) {
+		if (!et->preview_main) {
+			et->preview_main = BLO_load_main_from_file(et->preview_filepath);
+		}
+		sp->pr_main = et->preview_main ? et->preview_main : G_pr_main;
+	}
+	else if ((method != PR_NODE_RENDER) && id_type != ID_TE && use_new_shading) {
 		sp->pr_main = G_pr_main_cycles;
 	}
 	else {

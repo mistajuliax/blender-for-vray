@@ -1952,6 +1952,7 @@ static int pyrna_py_to_prop(
 							             RNA_property_identifier(prop), RNA_struct_identifier(tmp.type),
 							             RNA_struct_identifier(param->ptr.type));
 						}
+
 						Py_XDECREF(value_new); return -1;
 					}
 				}

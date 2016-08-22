@@ -33,7 +33,12 @@
 
 #include "idprop_py_api.h"
 
+
 #include "BKE_idprop.h"
+
+extern bool pyrna_id_FromPyObject(PyObject *obj, ID **id);
+extern bool pyrna_id_CheckPyObject(PyObject *obj);
+extern PyObject *pyrna_id_CreatePyObject(ID *id);
 
 #define USE_STRING_COERCE
 
@@ -625,6 +630,8 @@ static PyObject *BPy_IDGroup_MapDataToPy(IDProperty *prop)
 			return idprop_py_from_idp_float(prop);
 		case IDP_DOUBLE:
 			return idprop_py_from_idp_double(prop);
+		case IDP_ID:
+			return idprop_py_from_idp_id(NULL, prop);
 		case IDP_ARRAY:
 		{
 			PyObject *seq = PyList_New(prop->len);

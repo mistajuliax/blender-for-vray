@@ -29,6 +29,7 @@ set(INC
 	intern/include
 	../blenkernel
 	../blenlib
+	../blenloader
 	../blentranslation
 	../imbuf
 	../depsgraph

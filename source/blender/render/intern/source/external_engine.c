@@ -43,10 +43,12 @@
 #include "BLI_utildefines.h"
 
 #include "BKE_camera.h"
+
 #include "BKE_global.h"
 #include "BKE_colortools.h"
 #include "BKE_report.h"
 #include "BKE_scene.h"
+#include "BKE_library.h"
 
 #include "RNA_access.h"
 
@@ -68,6 +70,7 @@
 static RenderEngineType internal_render_type = {
 	NULL, NULL,
 	"BLENDER_RENDER", N_("Blender Render"), RE_INTERNAL,
+	"", NULL,
 	NULL, NULL, NULL, NULL, NULL, NULL,
 	{NULL, NULL, NULL}
 };
@@ -77,6 +80,7 @@ static RenderEngineType internal_render_type = {
 static RenderEngineType internal_game_type = {
 	NULL, NULL,
 	"BLENDER_GAME", N_("Blender Game"), RE_INTERNAL | RE_GAME,
+	"", NULL,
 	NULL, NULL, NULL, NULL, NULL, NULL,
 	{NULL, NULL, NULL}
 };
@@ -101,6 +105,9 @@ void RE_engines_exit(void)
 		next = type->next;
 
 		BLI_remlink(&R_engines, type);
+
+		if (type->preview_main)
+			BKE_main_free(type->preview_main);
 
 		if (!(type->flag & RE_INTERNAL)) {
 			if (type->ext.free)

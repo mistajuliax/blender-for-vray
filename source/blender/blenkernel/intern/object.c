@@ -67,6 +67,7 @@
 #include "BLI_utildefines.h"
 #include "BLI_linklist.h"
 #include "BLI_kdtree.h"
+#include "BLI_callbacks.h"
 
 #include "BLT_translation.h"
 
@@ -129,6 +130,8 @@
 #include "CCGSubSurf.h"
 
 #include "GPU_material.h"
+
+#include "RNA_access.h"
 
 /* Vertex parent modifies original BMesh which is not safe for threading.
  * Ideally such a modification should be handled as a separate DAG update
@@ -2641,6 +2644,18 @@ void BKE_object_handle_update_ex(EvaluationContext *eval_ctx,
                                  RigidBodyWorld *rbw,
                                  const bool do_proxy_update)
 {
+	PointerRNA ptr;
+	int        data_updated = CGR_NONE;
+
+	RNA_pointer_create((ID*)ob, &RNA_Object, ob, &ptr);
+	if (!RNA_struct_find_property(&ptr, "vray")) {
+		ptr = PointerRNA_NULL;
+	}
+	else {
+		ptr = RNA_pointer_get(&ptr, "vray");
+		data_updated = RNA_int_get(&ptr, "data_updated");
+	}
+
 	if (ob->recalc & OB_RECALC_ALL) {
 		/* speed optimization for animation lookups */
 		if (ob->pose) {
@@ -2688,8 +2703,20 @@ void BKE_object_handle_update_ex(EvaluationContext *eval_ctx,
 				BKE_object_where_is_calc_ex(scene, rbw, ob, NULL);
 		}
 		
+		if(ob->recalc & OB_RECALC_OB || ob->recalc & OB_RECALC_TIME)
+			if (ptr.data)
+				RNA_int_set(&ptr, "data_updated", data_updated | CGR_UPDATED_OBJECT);
+
 		if (ob->recalc & OB_RECALC_DATA) {
 			BKE_object_handle_data_update(eval_ctx, scene, ob);
+			BLI_callback_exec(NULL, &ob->id, BLI_CB_EVT_OBJECT_DATA_UPDATE);
+			if (ptr.data)
+				RNA_int_set(&ptr, "data_updated", data_updated | CGR_UPDATED_DATA);
+		}
+		else {
+			BLI_callback_exec(NULL, &ob->id, BLI_CB_EVT_OBJECT_UPDATE);
+			if (ptr.data)
+				RNA_int_set(&ptr, "data_updated", data_updated | CGR_UPDATED_OBJECT);
 		}
 
 		ob->recalc &= ~OB_RECALC_ALL;
@@ -3302,6 +3329,40 @@ bool BKE_object_is_animated(Scene *scene, Object *ob)
 			return true;
 		}
 	return false;
+}
+
+static void copy_object__forwardModifierLinks(void *UNUSED(userData), Object *UNUSED(ob), ID **idpoin)
+{
+	/* this is copied from ID_NEW; it might be better to have a macro */
+	if (*idpoin && (*idpoin)->newid) *idpoin = (*idpoin)->newid;
+}
+
+void BKE_object_relink(Object *ob)
+{
+	if (ob->id.lib)
+		return;
+
+	BKE_constraints_relink(&ob->constraints);
+	if (ob->pose) {
+		bPoseChannel *chan;
+		for (chan = ob->pose->chanbase.first; chan; chan = chan->next) {
+			BKE_constraints_relink(&chan->constraints);
+		}
+	}
+	modifiers_foreachIDLink(ob, copy_object__forwardModifierLinks, NULL);
+
+	if (ob->adt)
+		BKE_animdata_relink(ob->adt);
+	
+	if (ob->rigidbody_constraint)
+		BKE_rigidbody_relink_constraint(ob->rigidbody_constraint);
+
+	ID_NEW(ob->parent);
+
+	ID_NEW(ob->proxy);
+	ID_NEW(ob->proxy_group);
+
+	IDP_RelinkProperty(ob->id.properties);
 }
 
 MovieClip *BKE_object_movieclip_get(Scene *scene, Object *ob, bool use_default)

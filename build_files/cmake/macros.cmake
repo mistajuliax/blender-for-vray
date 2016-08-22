@@ -51,7 +51,7 @@ endmacro()
 function(list_assert_duplicates
 	list_id
 	)
-	
+
 	# message(STATUS "list data: ${list_id}")
 
 	list(LENGTH list_id _len_before)
@@ -333,6 +333,14 @@ function(SETUP_LIBDIRS)
 		link_directories(${LLVM_LIBPATH})
 	endif()
 
+	if(WITH_VRAY_FOR_BLENDER)
+		link_directories(${APPSDK_ROOT}/bin)
+		link_directories(${APPSDK_ROOT}/lib)
+		link_directories(${APPSDK_PATH}/devel)
+		link_directories(${LIBS_ROOT}/${CMAKE_SYSTEM_NAME}/zmq/lib/${CMAKE_BUILD_TYPE})
+		link_directories(${LIBS_ROOT}/${CMAKE_SYSTEM_NAME}/sodium/lib/${CMAKE_BUILD_TYPE})
+	endif()
+
 	if(WITH_ALEMBIC)
 		link_directories(${ALEMBIC_LIBPATH})
 		link_directories(${HDF5_LIBPATH})
@@ -507,6 +515,27 @@ function(setup_liblinks
 			target_link_libraries(${target} "extern_cuew")
 		else()
 			target_link_libraries(${target} ${CUDA_CUDA_LIBRARY})
+		endif()
+	endif()
+
+	if(WITH_VRAY_FOR_BLENDER)
+		if(USE_BLENDER_VRAY_ZMQ)
+			target_link_libraries(${target} ${JPEG_TURBO_LIB})
+		endif()
+
+		if(USE_BLENDER_VRAY_APPSDK)
+			target_link_libraries(${target} VRaySDKLibrary)
+		endif()
+
+		if(UNIX)
+			target_link_libraries(${target}
+				${LIBS_ROOT}/${CMAKE_SYSTEM_NAME}/zmq/lib/Release/libzmq.a
+				${LIBS_ROOT}/${CMAKE_SYSTEM_NAME}/sodium/lib/Release/libsodium.a
+				)
+		elseif(WIN32)
+			target_link_libraries(${target} libsodium)
+			target_link_libraries(${target} libzmq)
+			target_link_libraries(${target} wsock32 ws2_32)
 		endif()
 	endif()
 
@@ -731,6 +760,11 @@ function(SETUP_BLENDER_SORTED_LIBS)
 
 	if(WITH_BULLET AND NOT WITH_SYSTEM_BULLET)
 		list_insert_after(BLENDER_SORTED_LIBS "ge_logic_ngnetwork" "extern_bullet")
+	endif()
+
+	if(WITH_VRAY_FOR_BLENDER)
+		list_insert_after(BLENDER_SORTED_LIBS "bf_python_bmesh" "vray_for_blender")
+		list_insert_after(BLENDER_SORTED_LIBS "vray_for_blender" "vray_for_blender_rt")
 	endif()
 
 	if(WITH_GAMEENGINE_DECKLINK)

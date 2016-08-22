@@ -146,6 +146,8 @@
 #include "BKE_sequencer.h"
 #include "BKE_outliner_treehash.h"
 #include "BKE_sound.h"
+#include "BKE_idprop.h" // for IDP_Id macro
+
 #include "BKE_colortools.h"
 #include "BKE_idprop.h"
 
@@ -1950,7 +1952,7 @@ static void link_glob_list(FileData *fd, ListBase *lb)		/* for glob data */
 	lb->last = prev;
 }
 
-/* Converts pointer arrays between architectures. If you don't know the number of
+/* Converts pointer arrays between architectures. If you don't know the number of 
 *  items, pass -1 and it will be inferred (dangerous, avoid if possible). */
 static void test_pointer_array(FileData *fd, void **mat, size_t items)
 {
@@ -2137,11 +2139,15 @@ static void _IDP_DirectLinkGroup_OrFree(IDProperty **prop, int switch_endian, Fi
 	}
 }
 
+extern void IDP_ID_Register(IDProperty *prop);
+extern void IDP_ID_Unregister(IDProperty *prop);
+
 /* stub function */
 static void IDP_LibLinkProperty(IDProperty *prop, FileData *fd)
 {
 	IDProperty *loop;
 	IDProperty *idp_loop;
+	void       *newaddr = NULL;
 	int i;
 
 	if (!prop) return;
@@ -2149,9 +2155,13 @@ static void IDP_LibLinkProperty(IDProperty *prop, FileData *fd)
 
 	for (loop = prop->data.group.first; loop; loop = loop->next) {
 		switch (loop->type) {
-		case IDP_ID: /* PointerProperty */
-			loop->data.pointer = newlibadr(fd, NULL, IDP_Id(loop));
-			IDP_ID_Register(loop);
+		case IDP_ID: /* DatablockProperty */
+			newaddr = newlibadr(fd, NULL, IDP_Id(loop));
+			if (newaddr) {
+				IDP_ID_Unregister(loop);
+				loop->data.pointer = newaddr;
+				IDP_ID_Register(loop);
+			}
 			break;
 		case IDP_IDPARRAY: /* CollectionProperty */
 			idp_loop = IDP_Array(loop);
@@ -2778,7 +2788,8 @@ static void lib_link_node_socket(FileData *fd, ID *UNUSED(id), bNodeSocket *sock
 {
 	/* Link ID Properties -- and copy this comment EXACTLY for easy finding
 	 * of library blocks that implement this.*/
-	IDP_LibLinkProperty(sock->prop, fd);
+	if (sock->prop)
+		IDP_LibLinkProperty(sock->prop, fd);
 }
 
 /* Single node tree (also used for material/scene trees), ntree is not NULL */
@@ -2791,13 +2802,17 @@ static void lib_link_ntree(FileData *fd, ID *id, bNodeTree *ntree)
 	
 	ntree->gpd = newlibadr_us(fd, id->lib, ntree->gpd);
 
-	IDP_LibLinkProperty(ntree->id.properties, fd);
+	if (ntree->id.tag & LIB_TAG_NEED_LINK) {
+		IDP_LibLinkProperty(ntree->id.properties, fd);
+	}
 	
 	for (node = ntree->nodes.first; node; node = node->next) {
 		/* Link ID Properties -- and copy this comment EXACTLY for easy finding
 		 * of library blocks that implement this.*/
-		IDP_LibLinkProperty(node->prop, fd);
-		
+		if (node->prop && ntree->id.tag & LIB_TAG_NEED_LINK) {
+			IDP_LibLinkProperty(node->prop, fd);
+		}
+
 		node->id= newlibadr_us(fd, id->lib, node->id);
 
 		for (sock = node->inputs.first; sock; sock = sock->next)
@@ -2820,8 +2835,8 @@ static void lib_link_nodetree(FileData *fd, Main *main)
 	/* only link ID pointers */
 	for (ntree = main->nodetree.first; ntree; ntree = ntree->id.next) {
 		if (ntree->id.tag & LIB_TAG_NEED_LINK) {
-			ntree->id.tag &= ~LIB_TAG_NEED_LINK;
 			lib_link_ntree(fd, &ntree->id, ntree);
+			ntree->id.tag &= ~LIB_TAG_NEED_LINK;
 		}
 	}
 }
@@ -3107,6 +3122,12 @@ static void direct_link_nodetree(FileData *fd, bNodeTree *ntree)
 				else if (node->type==SH_NODE_TEX_POINTDENSITY) {
 					NodeShaderTexPointDensity *npd = (NodeShaderTexPointDensity *) node->storage;
 					memset(&npd->pd, 0, sizeof(npd->pd));
+				}
+			}
+			/* Make it possible to use some Blender nodes inside pynode trees */
+			else if (ntree->type==NTREE_CUSTOM) {
+				if (ELEM(node->type, SH_NODE_CURVE_VEC, SH_NODE_CURVE_RGB)) {
+					direct_link_curvemapping(fd, node->storage);
 				}
 			}
 			else if (ntree->type==NTREE_COMPOSIT) {
@@ -3724,7 +3745,6 @@ static void lib_link_image(FileData *fd, Main *main)
 	for (ima = main->image.first; ima; ima = ima->id.next) {
 		if (ima->id.tag & LIB_TAG_NEED_LINK) {
 			IDP_LibLinkProperty(ima->id.properties, fd);
-			
 			ima->id.tag &= ~LIB_TAG_NEED_LINK;
 		}
 	}
@@ -3969,12 +3989,13 @@ static void lib_link_material(FileData *fd, Main *main)
 	for (ma = main->mat.first; ma; ma = ma->id.next) {
 		if (ma->id.tag & LIB_TAG_NEED_LINK) {
 			lib_link_animdata(fd, &ma->id, ma->adt);
-			
+
 			/* Link ID Properties -- and copy this comment EXACTLY for easy finding
 			 * of library blocks that implement this.*/
 			IDP_LibLinkProperty(ma->id.properties, fd);
 			
 			ma->ipo = newlibadr_us(fd, ma->id.lib, ma->ipo);  // XXX deprecated - old animation system
+
 			ma->group = newlibadr_us(fd, ma->id.lib, ma->group);
 			
 			for (a = 0; a < MAX_MTEX; a++) {
@@ -4424,12 +4445,11 @@ static void lib_link_mesh(FileData *fd, Main *main)
 	for (me = main->mesh.first; me; me = me->id.next) {
 		if (me->id.tag & LIB_TAG_NEED_LINK) {
 			int i;
-			
 			/* Link ID Properties -- and copy this comment EXACTLY for easy finding
 			 * of library blocks that implement this.*/
-			lib_link_animdata(fd, &me->id, me->adt);
+			if (me->adt) lib_link_animdata(fd, &me->id, me->adt);
 			IDP_LibLinkProperty(me->id.properties, fd);
-			
+
 			/* this check added for python created meshes */
 			if (me->mat) {
 				for (i = 0; i < me->totcol; i++) {
@@ -4973,6 +4993,17 @@ static void lib_link_object(FileData *fd, Main *main)
 				}
 			}
 			
+			{
+				ModifierData *mdIter = ob->modifiers.first;
+
+				for (; mdIter; mdIter = mdIter->next) {
+					if (mdIter->type == eModifierType_Array) {
+						ArrayModifierData *amd = (ArrayModifierData *)mdIter;
+						amd->dupliTms = NULL;
+					}
+				}
+			}
+
 			/* texture field */
 			if (ob->pd)
 				lib_link_partdeflect(fd, &ob->id, ob->pd);
@@ -5663,11 +5694,11 @@ static void lib_link_scene(FileData *fd, Main *main)
 		if (sce->id.tag & LIB_TAG_NEED_LINK) {
 			/* Link ID Properties -- and copy this comment EXACTLY for easy finding
 			 * of library blocks that implement this.*/
-			lib_link_animdata(fd, &sce->id, sce->adt);
+			if (sce->adt) lib_link_animdata(fd, &sce->id, sce->adt);
 			IDP_LibLinkProperty(sce->id.properties, fd);
-			
+
 			lib_link_keyingsets(fd, &sce->id, &sce->keyingsets);
-			
+
 			sce->camera = newlibadr(fd, sce->id.lib, sce->camera);
 			sce->world = newlibadr_us(fd, sce->id.lib, sce->world);
 			sce->set = newlibadr(fd, sce->id.lib, sce->set);
@@ -7329,6 +7360,7 @@ static void lib_link_library(FileData *fd, Main *main)
 {
 	Library *lib;
 	for (lib = main->library.first; lib; lib = lib->id.next) {
+		lib->id.us = 1;
 		id_us_ensure_real(&lib->id);
 		IDP_LibLinkProperty(lib->id.properties, fd);
 	}
@@ -8417,7 +8449,24 @@ static void do_versions_after_linking(FileData *fd, Library *lib, Main *main)
 
 static void lib_link_all(FileData *fd, Main *main)
 {
+	ListBase *lbarray[MAX_LIBARRAY];
+	int i;
+
 	oldnewmap_sort(fd);
+
+	i = set_listbasepointers(main, lbarray);
+	while (i--) {
+		ID *loop = lbarray[i]->first;
+
+		if (lbarray[i] == &main->nodetree)
+			continue; /* Since nodetrees aren't all in main, they do their own id-prop linking */
+
+		while (loop) {
+			if (loop->tag & LIB_TAG_NEED_LINK) /* Don't unset yet! */
+				IDP_LibLinkProperty(loop->properties, fd);
+			loop = loop->next;
+		}
+	}
 	
 	/* No load UI for undo memfiles */
 	if (fd->memfile == NULL) {
@@ -8459,6 +8508,8 @@ static void lib_link_all(FileData *fd, Main *main)
 	lib_link_mesh(fd, main);		/* as last: tpage images with users at zero */
 	
 	lib_link_library(fd, main);		/* only init users */
+
+	IDP_restore_fake_user();
 }
 
 static void direct_link_keymapitem(FileData *fd, wmKeyMapItem *kmi)
@@ -8854,8 +8905,14 @@ static void expand_constraint_channels(FileData *fd, Main *mainvar, ListBase *ch
 static void expand_idprops(FileData *fd, Main *mainvar, IDProperty *idprop)
 {
 	IDProperty *loop;
-	IDProperty *idp_loop;
+	IDProperty **idp_loop;
 	int i;
+
+	/* NOTE: One scene stores invalid idprop address
+	 * This is the only fix I came with right now...
+	 */
+	if ((intptr_t)idprop < 0xFF)
+		return;
 
 	if (!idprop) return;
 	BLI_assert(idprop->type == IDP_GROUP);
@@ -8863,17 +8920,17 @@ static void expand_idprops(FileData *fd, Main *mainvar, IDProperty *idprop)
 	for (loop = idprop->data.group.first; loop; loop = loop->next) {
 		switch (loop->type)
 		{
-			case IDP_ID:
-				expand_doit(fd, mainvar, IDP_Id(loop));
-				break;
-			case IDP_IDPARRAY:
-				idp_loop = IDP_Array(loop);
-				for (i = 0; i < loop->totallen; i++)
-					expand_idprops(fd, mainvar, &idp_loop[i]);
-				break;
-			case IDP_GROUP:
-				expand_idprops(fd, mainvar, loop);
-				break;
+		case IDP_ID:
+			expand_doit(fd, mainvar, IDP_Id(loop));
+			break;
+		case IDP_IDPARRAY:
+			idp_loop = IDP_Array(loop);
+			for (i = 0; i < loop->totallen; i++)
+				expand_idprops(fd, mainvar, idp_loop[i]);
+			break;
+		case IDP_GROUP:
+			expand_idprops(fd, mainvar, loop);
+			break;
 		}
 	}
 }
@@ -9066,13 +9123,17 @@ static void expand_nodetree(FileData *fd, Main *mainvar, bNodeTree *ntree)
 		expand_doit(fd, mainvar, ntree->gpd);
 	
 	for (node = ntree->nodes.first; node; node = node->next) {
+		// NOTE: This is needed to load PointerProperty datablocks
+		// from Python nodes (which do not have node->id)
+		if (node->prop)
+			expand_idprops(fd, mainvar, node->prop);
+
 		if (node->id && node->type != CMP_NODE_R_LAYERS) {
 			expand_doit(fd, mainvar, node->id);
 
-			expand_idprops(fd, mainvar, node->prop);
-
 			for (sock = node->inputs.first; sock; sock = sock->next)
 				expand_doit(fd, mainvar, sock->prop);
+
 			for (sock = node->outputs.first; sock; sock = sock->next)
 				expand_doit(fd, mainvar, sock->prop);
 		}
@@ -9315,6 +9376,7 @@ static void expand_pose(FileData *fd, Main *mainvar, bPose *pose)
 	
 	for (chan = pose->chanbase.first; chan; chan = chan->next) {
 		expand_constraints(fd, mainvar, &chan->constraints);
+		// XXX: Crash here! Research why!
 		expand_idprops(fd, mainvar, chan->prop);
 		expand_doit(fd, mainvar, chan->custom);
 	}
@@ -10497,4 +10559,28 @@ BlendFileData *blo_read_blendafterruntime(int file, const char *name, int actual
 	blo_freefiledata(fd);
 	
 	return bfd;
+}
+
+struct Main *BLO_load_main_from_file(const char *filepath)
+{
+	const int fileflags = G.fileflags;
+	Main *bmain = NULL;
+	BlendFileData *bfd;
+
+	G.fileflags |= G_FILE_NO_UI;
+	bfd = BLO_read_from_file(filepath, NULL);
+	if (bfd) {
+		bmain = bfd->main;
+
+		MEM_freeN(bfd);
+	}
+	G.fileflags = fileflags;
+
+	return bmain;
+}
+
+
+void BLO_verify_custom_data(struct Main *bmain)
+{
+	IDP_restore_fake_user();
 }
