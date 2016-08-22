@@ -1250,7 +1250,7 @@ void RNA_def_property_array(PropertyRNA *prop, int length)
 			prop->arraydimension = 1;
 			break;
 		default:
-			fprintf(stderr, "%s: \"%s.%s\", only boolean/int/float can be array.\n",
+			fprintf(stderr, "%s: \"%s.%s\", only boolean/int/float/pointer can be array.\n",
 			        __func__, srna->identifier, prop->identifier);
 			DefRNA.error = 1;
 			break;
@@ -2150,9 +2150,17 @@ void RNA_def_property_update(PropertyRNA *prop, int noteflag, const char *func)
 	prop->update = (UpdateFunc)func;
 }
 
-void RNA_def_property_update_runtime(PropertyRNA *prop, const void *func)
+void RNA_def_property_update_runtime(PropertyRNA *prop, void * const func)
 {
 	prop->update = (void *)func;
+}
+
+void RNA_def_property_poll_runtime(PropertyRNA *prop, void * const func)
+{
+	if (prop->type == PROP_POINTER)
+		((PointerPropertyRNA *)prop)->poll = func;
+	else
+		fprintf(stderr, "%s: %s is not a Pointer Property.\n", __func__, prop->identifier);
 }
 
 void RNA_def_property_dynamic_array_funcs(PropertyRNA *prop, const char *getlength)
@@ -2969,6 +2977,7 @@ PropertyRNA *RNA_def_pointer_runtime(StructOrFunctionRNA *cont_, const char *ide
 	
 	prop = RNA_def_property(cont, identifier, PROP_POINTER, PROP_NONE);
 	RNA_def_property_struct_runtime(prop, type);
+	if ((type->flag & STRUCT_ID) != 0) prop->flag |= PROP_EDITABLE;
 	RNA_def_property_ui_text(prop, ui_name, ui_description);
 
 	return prop;

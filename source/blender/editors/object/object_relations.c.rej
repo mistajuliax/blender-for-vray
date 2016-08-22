@@ -1,0 +1,9 @@
+diff a/source/blender/editors/object/object_relations.c b/source/blender/editors/object/object_relations.c	(rejected hunks)
+@@ -2105,6 +2109,7 @@
+ 		single_tex_users_expand(bmain);
+ 	}
+ 
++//	BKE_libblock_relink_ex(bmain, scene, NULL, NULL, true);
+ 	BKE_main_id_clear_newpoins(bmain);
+ }
+ 

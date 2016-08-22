@@ -147,6 +147,7 @@
 #include "BKE_outliner_treehash.h"
 #include "BKE_sound.h"
 #include "BKE_colortools.h"
+#include "BKE_idprop.h"
 
 #include "NOD_common.h"
 #include "NOD_socket.h"
@@ -1949,24 +1950,34 @@ static void link_glob_list(FileData *fd, ListBase *lb)		/* for glob data */
 	lb->last = prev;
 }
 
-static void test_pointer_array(FileData *fd, void **mat)
+/* Converts pointer arrays between architectures. If you don't know the number of
+*  items, pass -1 and it will be inferred (dangerous, avoid if possible). */
+static void test_pointer_array(FileData *fd, void **mat, size_t items)
 {
 	int64_t *lpoin, *lmat;
 	int *ipoin, *imat;
-	size_t len;
+	int array_pointer_len;
 
 		/* manually convert the pointer array in
 		 * the old dna format to a pointer array in
 		 * the new dna format.
 		 */
 	if (*mat) {
-		len = MEM_allocN_len(*mat)/fd->filesdna->pointerlen;
-			
-		if (fd->filesdna->pointerlen==8 && fd->memsdna->pointerlen==4) {
-			ipoin=imat= MEM_mallocN(len * 4, "newmatar");
+		if (items == -1) {
+			array_pointer_len = fd->filesdna->pointerlen;
+			items = MEM_allocN_len(*mat) / fd->filesdna->pointerlen;
+		}
+		else {
+			/* Don't trust filesdna->pointerlen; this obscure array
+			*  may have been saved blindly by an old version of Blender. */
+			array_pointer_len = MEM_allocN_len(*mat) / items;
+		}
+
+		if (array_pointer_len==8 && fd->memsdna->pointerlen==4) {
+			ipoin = imat = MEM_mallocN(items * 4, "newmatar");
 			lpoin= *mat;
 			
-			while (len-- > 0) {
+			while (items-- > 0) {
 				if ((fd->flags & FD_FLAGS_SWITCH_ENDIAN))
 					BLI_endian_switch_int64(lpoin);
 				*ipoin = (int)((*lpoin) >> 3);
@@ -1977,11 +1988,11 @@ static void test_pointer_array(FileData *fd, void **mat)
 			*mat = imat;
 		}
 		
-		if (fd->filesdna->pointerlen==4 && fd->memsdna->pointerlen==8) {
-			lpoin = lmat = MEM_mallocN(len * 8, "newmatar");
+		if (array_pointer_len==4 && fd->memsdna->pointerlen==8) {
+			lpoin = lmat = MEM_mallocN(items * 8, "newmatar");
 			ipoin = *mat;
 			
-			while (len-- > 0) {
+			while (items-- > 0) {
 				*lpoin = *ipoin;
 				ipoin++;
 				lpoin++;
@@ -1995,7 +2006,7 @@ static void test_pointer_array(FileData *fd, void **mat)
 /* ************ READ ID Properties *************** */
 
 static void IDP_DirectLinkProperty(IDProperty *prop, int switch_endian, FileData *fd);
-static void IDP_LibLinkProperty(IDProperty *prop, int switch_endian, FileData *fd);
+static void IDP_LibLinkProperty(IDProperty *prop, FileData *fd);
 
 static void IDP_DirectLinkIDPArray(IDProperty *prop, int switch_endian, FileData *fd)
 {
@@ -2030,7 +2041,7 @@ static void IDP_DirectLinkArray(IDProperty *prop, int switch_endian, FileData *f
 	prop->data.pointer = newdataadr(fd, prop->data.pointer);
 	
 	if (prop->subtype == IDP_GROUP) {
-		test_pointer_array(fd, prop->data.pointer);
+		test_pointer_array(fd, prop->data.pointer, prop->totallen);
 		array = prop->data.pointer;
 		
 		for (i = 0; i < prop->len; i++)
@@ -2127,9 +2138,32 @@ static void _IDP_DirectLinkGroup_OrFree(IDProperty **prop, int switch_endian, Fi
 }
 
 /* stub function */
-static void IDP_LibLinkProperty(IDProperty *UNUSED(prop), int UNUSED(switch_endian), FileData *UNUSED(fd))
+static void IDP_LibLinkProperty(IDProperty *prop, FileData *fd)
 {
-	/* Should we do something here, prop should be ensured to be non-NULL first... */
+	IDProperty *loop;
+	IDProperty *idp_loop;
+	int i;
+
+	if (!prop) return;
+	BLI_assert(prop->type == IDP_GROUP);
+
+	for (loop = prop->data.group.first; loop; loop = loop->next) {
+		switch (loop->type) {
+		case IDP_ID: /* PointerProperty */
+			loop->data.pointer = newlibadr(fd, NULL, IDP_Id(loop));
+			IDP_ID_Register(loop);
+			break;
+		case IDP_IDPARRAY: /* CollectionProperty */
+			idp_loop = IDP_Array(loop);
+			for (i = 0; i < loop->totallen; i++) {
+				IDP_LibLinkProperty(&(idp_loop[i]), fd);
+			}
+			break;
+		case IDP_GROUP: /* PointerProperty */
+			IDP_LibLinkProperty(loop, fd);
+			break;
+		}
+	}
 }
 
 /* ************ READ IMAGE PREVIEW *************** */
@@ -2190,6 +2224,7 @@ static void lib_link_brush(FileData *fd, Main *main)
 	/* only link ID pointers */
 	for (brush = main->brush.first; brush; brush = brush->id.next) {
 		if (brush->id.tag & LIB_TAG_NEED_LINK) {
+			IDP_LibLinkProperty(brush->id.properties, fd);
 			brush->id.tag &= ~LIB_TAG_NEED_LINK;
 			
 			/* brush->(mask_)mtex.obj is ignored on purpose? */
@@ -2501,6 +2536,7 @@ static void lib_link_action(FileData *fd, Main *main)
 
 	for (act = main->action.first; act; act = act->id.next) {
 		if (act->id.tag & LIB_TAG_NEED_LINK) {
+			IDP_LibLinkProperty(act->id.properties, fd);
 			act->id.tag &= ~LIB_TAG_NEED_LINK;
 			
 // XXX deprecated - old animation system <<<
@@ -2742,7 +2778,7 @@ static void lib_link_node_socket(FileData *fd, ID *UNUSED(id), bNodeSocket *sock
 {
 	/* Link ID Properties -- and copy this comment EXACTLY for easy finding
 	 * of library blocks that implement this.*/
-	IDP_LibLinkProperty(sock->prop, (fd->flags & FD_FLAGS_SWITCH_ENDIAN), fd);
+	IDP_LibLinkProperty(sock->prop, fd);
 }
 
 /* Single node tree (also used for material/scene trees), ntree is not NULL */
@@ -2754,11 +2790,13 @@ static void lib_link_ntree(FileData *fd, ID *id, bNodeTree *ntree)
 	lib_link_animdata(fd, &ntree->id, ntree->adt);
 	
 	ntree->gpd = newlibadr_us(fd, id->lib, ntree->gpd);
+
+	IDP_LibLinkProperty(ntree->id.properties, fd);
 	
 	for (node = ntree->nodes.first; node; node = node->next) {
 		/* Link ID Properties -- and copy this comment EXACTLY for easy finding
 		 * of library blocks that implement this.*/
-		IDP_LibLinkProperty(node->prop, (fd->flags & FD_FLAGS_SWITCH_ENDIAN), fd);
+		IDP_LibLinkProperty(node->prop, fd);
 		
 		node->id= newlibadr_us(fd, id->lib, node->id);
 
@@ -3294,10 +3332,14 @@ static void lib_link_pose(FileData *fd, Main *bmain, Object *ob, bPose *pose)
 static void lib_link_armature(FileData *fd, Main *main)
 {
 	bArmature *arm;
+	Bone *bone;
 	
 	for (arm = main->armature.first; arm; arm = arm->id.next) {
 		if (arm->id.tag & LIB_TAG_NEED_LINK) {
 			lib_link_animdata(fd, &arm->id, arm->adt);
+			IDP_LibLinkProperty(arm->id.properties, fd);
+			for (bone = arm->bonebase.first; bone; bone = bone->next)
+				IDP_LibLinkProperty(bone->prop, fd);
 			arm->id.tag &= ~LIB_TAG_NEED_LINK;
 		}
 	}
@@ -3347,7 +3389,8 @@ static void lib_link_camera(FileData *fd, Main *main)
 	for (ca = main->camera.first; ca; ca = ca->id.next) {
 		if (ca->id.tag & LIB_TAG_NEED_LINK) {
 			lib_link_animdata(fd, &ca->id, ca->adt);
-			
+			IDP_LibLinkProperty(ca->id.properties, fd);
+
 			ca->ipo = newlibadr_us(fd, ca->id.lib, ca->ipo); // XXX deprecated - old animation system
 			
 			ca->dof_ob = newlibadr(fd, ca->id.lib, ca->dof_ob);
@@ -3375,6 +3418,7 @@ static void lib_link_lamp(FileData *fd, Main *main)
 	for (la = main->lamp.first; la; la = la->id.next) {
 		if (la->id.tag & LIB_TAG_NEED_LINK) {
 			lib_link_animdata(fd, &la->id, la->adt);
+			IDP_LibLinkProperty(la->id.properties, fd);
 			
 			for (a = 0; a < MAX_MTEX; a++) {
 				mtex = la->mtex[a];
@@ -3446,6 +3490,7 @@ static void lib_link_key(FileData *fd, Main *main)
 
 		if (key->id.tag & LIB_TAG_NEED_LINK) {
 			lib_link_animdata(fd, &key->id, key->adt);
+			IDP_LibLinkProperty(key->id.properties, fd);
 			
 			key->ipo = newlibadr_us(fd, key->id.lib, key->ipo); // XXX deprecated - old animation system
 			key->from = newlibadr(fd, key->id.lib, key->from);
@@ -3513,6 +3558,7 @@ static void lib_link_mball(FileData *fd, Main *main)
 	for (mb = main->mball.first; mb; mb = mb->id.next) {
 		if (mb->id.tag & LIB_TAG_NEED_LINK) {
 			lib_link_animdata(fd, &mb->id, mb->adt);
+			IDP_LibLinkProperty(mb->id.properties, fd);
 			
 			for (a = 0; a < mb->totcol; a++) 
 				mb->mat[a] = newlibadr_us(fd, mb->id.lib, mb->mat[a]);
@@ -3530,7 +3576,7 @@ static void direct_link_mball(FileData *fd, MetaBall *mb)
 	direct_link_animdata(fd, mb->adt);
 	
 	mb->mat = newdataadr(fd, mb->mat);
-	test_pointer_array(fd, (void **)&mb->mat);
+	test_pointer_array(fd, (void **)&mb->mat, -1);
 	
 	link_list(fd, &(mb->elems));
 	
@@ -3551,6 +3597,7 @@ static void lib_link_world(FileData *fd, Main *main)
 	for (wrld = main->world.first; wrld; wrld = wrld->id.next) {
 		if (wrld->id.tag & LIB_TAG_NEED_LINK) {
 			lib_link_animdata(fd, &wrld->id, wrld->adt);
+			IDP_LibLinkProperty(wrld->id.properties, fd);
 			
 			wrld->ipo = newlibadr_us(fd, wrld->id.lib, wrld->ipo); // XXX deprecated - old animation system
 			
@@ -3596,12 +3643,13 @@ static void direct_link_world(FileData *fd, World *wrld)
 
 /* ************ READ VFONT ***************** */
 
-static void lib_link_vfont(FileData *UNUSED(fd), Main *main)
+static void lib_link_vfont(FileData *fd, Main *main)
 {
 	VFont *vf;
 	
 	for (vf = main->vfont.first; vf; vf = vf->id.next) {
 		if (vf->id.tag & LIB_TAG_NEED_LINK) {
+			IDP_LibLinkProperty(vf->id.properties, fd);
 			vf->id.tag &= ~LIB_TAG_NEED_LINK;
 		}
 	}
@@ -3616,12 +3664,13 @@ static void direct_link_vfont(FileData *fd, VFont *vf)
 
 /* ************ READ TEXT ****************** */
 
-static void lib_link_text(FileData *UNUSED(fd), Main *main)
+static void lib_link_text(FileData *fd, Main *main)
 {
 	Text *text;
 	
 	for (text = main->text.first; text; text = text->id.next) {
 		if (text->id.tag & LIB_TAG_NEED_LINK) {
+			IDP_LibLinkProperty(text->id.properties, fd);
 			text->id.tag &= ~LIB_TAG_NEED_LINK;
 		}
 	}
@@ -3674,7 +3723,7 @@ static void lib_link_image(FileData *fd, Main *main)
 	
 	for (ima = main->image.first; ima; ima = ima->id.next) {
 		if (ima->id.tag & LIB_TAG_NEED_LINK) {
-			IDP_LibLinkProperty(ima->id.properties, (fd->flags & FD_FLAGS_SWITCH_ENDIAN), fd);
+			IDP_LibLinkProperty(ima->id.properties, fd);
 			
 			ima->id.tag &= ~LIB_TAG_NEED_LINK;
 		}
@@ -3745,6 +3794,7 @@ static void lib_link_curve(FileData *fd, Main *main)
 	for (cu = main->curve.first; cu; cu = cu->id.next) {
 		if (cu->id.tag & LIB_TAG_NEED_LINK) {
 			lib_link_animdata(fd, &cu->id, cu->adt);
+			IDP_LibLinkProperty(cu->id.properties, fd);
 			
 			for (a = 0; a < cu->totcol; a++) 
 				cu->mat[a] = newlibadr_us(fd, cu->id.lib, cu->mat[a]);
@@ -3785,7 +3835,7 @@ static void direct_link_curve(FileData *fd, Curve *cu)
 	direct_link_animdata(fd, cu->adt);
 	
 	cu->mat = newdataadr(fd, cu->mat);
-	test_pointer_array(fd, (void **)&cu->mat);
+	test_pointer_array(fd, (void **)&cu->mat, -1);
 	cu->str = newdataadr(fd, cu->str);
 	cu->strinfo= newdataadr(fd, cu->strinfo);
 	cu->tb = newdataadr(fd, cu->tb);
@@ -3837,6 +3887,7 @@ static void lib_link_texture(FileData *fd, Main *main)
 	for (tex = main->tex.first; tex; tex = tex->id.next) {
 		if (tex->id.tag & LIB_TAG_NEED_LINK) {
 			lib_link_animdata(fd, &tex->id, tex->adt);
+			IDP_LibLinkProperty(tex->id.properties, fd);
 			
 			tex->ima = newlibadr_us(fd, tex->id.lib, tex->ima);
 			tex->ipo = newlibadr_us(fd, tex->id.lib, tex->ipo);  // XXX deprecated - old animation system
@@ -3921,7 +3972,7 @@ static void lib_link_material(FileData *fd, Main *main)
 			
 			/* Link ID Properties -- and copy this comment EXACTLY for easy finding
 			 * of library blocks that implement this.*/
-			IDP_LibLinkProperty(ma->id.properties, (fd->flags & FD_FLAGS_SWITCH_ENDIAN), fd);
+			IDP_LibLinkProperty(ma->id.properties, fd);
 			
 			ma->ipo = newlibadr_us(fd, ma->id.lib, ma->ipo);  // XXX deprecated - old animation system
 			ma->group = newlibadr_us(fd, ma->id.lib, ma->group);
@@ -4066,6 +4117,7 @@ static void lib_link_particlesettings(FileData *fd, Main *main)
 	for (part = main->particle.first; part; part = part->id.next) {
 		if (part->id.tag & LIB_TAG_NEED_LINK) {
 			lib_link_animdata(fd, &part->id, part->adt);
+			IDP_LibLinkProperty(part->id.properties, fd);
 			part->ipo = newlibadr_us(fd, part->id.lib, part->ipo); // XXX deprecated - old animation system
 			
 			part->dup_ob = newlibadr(fd, part->id.lib, part->dup_ob);
@@ -4375,8 +4427,8 @@ static void lib_link_mesh(FileData *fd, Main *main)
 			
 			/* Link ID Properties -- and copy this comment EXACTLY for easy finding
 			 * of library blocks that implement this.*/
-			IDP_LibLinkProperty(me->id.properties, (fd->flags & FD_FLAGS_SWITCH_ENDIAN), fd);
 			lib_link_animdata(fd, &me->id, me->adt);
+			IDP_LibLinkProperty(me->id.properties, fd);
 			
 			/* this check added for python created meshes */
 			if (me->mat) {
@@ -4546,7 +4598,7 @@ static void direct_link_customdata(FileData *fd, CustomData *data, int count)
 static void direct_link_mesh(FileData *fd, Mesh *mesh)
 {
 	mesh->mat= newdataadr(fd, mesh->mat);
-	test_pointer_array(fd, (void **)&mesh->mat);
+	test_pointer_array(fd, (void **)&mesh->mat, -1);
 	
 	mesh->mvert = newdataadr(fd, mesh->mvert);
 	mesh->medge = newdataadr(fd, mesh->medge);
@@ -4653,6 +4705,7 @@ static void lib_link_latt(FileData *fd, Main *main)
 	for (lt = main->latt.first; lt; lt = lt->id.next) {
 		if (lt->id.tag & LIB_TAG_NEED_LINK) {
 			lib_link_animdata(fd, &lt->id, lt->adt);
+			IDP_LibLinkProperty(lt->id.properties, fd);
 			
 			lt->ipo = newlibadr_us(fd, lt->id.lib, lt->ipo); // XXX deprecated - old animation system
 			lt->key = newlibadr_us(fd, lt->id.lib, lt->key);
@@ -4705,9 +4758,9 @@ static void lib_link_object(FileData *fd, Main *main)
 	
 	for (ob = main->object.first; ob; ob = ob->id.next) {
 		if (ob->id.tag & LIB_TAG_NEED_LINK) {
-			IDP_LibLinkProperty(ob->id.properties, (fd->flags & FD_FLAGS_SWITCH_ENDIAN), fd);
 			lib_link_animdata(fd, &ob->id, ob->adt);
-			
+			IDP_LibLinkProperty(ob->id.properties, fd);
+
 // XXX deprecated - old animation system <<<
 			ob->ipo = newlibadr_us(fd, ob->id.lib, ob->ipo);
 			ob->action = newlibadr_us(fd, ob->id.lib, ob->action);
@@ -5331,7 +5384,7 @@ static void direct_link_object(FileData *fd, Object *ob)
 // >>> XXX deprecated - old animation system
 	
 	ob->mat= newdataadr(fd, ob->mat);
-	test_pointer_array(fd, (void **)&ob->mat);
+	test_pointer_array(fd, (void **)&ob->mat, -1);
 	ob->matbits= newdataadr(fd, ob->matbits);
 	
 	/* do it here, below old data gets converted */
@@ -5400,7 +5453,7 @@ static void direct_link_object(FileData *fd, Object *ob)
 		/* although not used anymore */
 		/* still have to be loaded to be compatible with old files */
 		sb->keys = newdataadr(fd, sb->keys);
-		test_pointer_array(fd, (void **)&sb->keys);
+		test_pointer_array(fd, (void **)&sb->keys, sb->totkey);
 		if (sb->keys) {
 			int a;
 			for (a = 0; a < sb->totkey; a++) {
@@ -5445,7 +5498,7 @@ static void direct_link_object(FileData *fd, Object *ob)
 	for (sens = ob->sensors.first; sens; sens = sens->next) {
 		sens->data = newdataadr(fd, sens->data);
 		sens->links = newdataadr(fd, sens->links);
-		test_pointer_array(fd, (void **)&sens->links);
+		test_pointer_array(fd, (void **)&sens->links, sens->totlinks);
 	}
 
 	direct_link_constraints(fd, &ob->constraints);
@@ -5461,7 +5514,7 @@ static void direct_link_object(FileData *fd, Object *ob)
 	for (cont = ob->controllers.first; cont; cont = cont->next) {
 		cont->data = newdataadr(fd, cont->data);
 		cont->links = newdataadr(fd, cont->links);
-		test_pointer_array(fd, (void **)&cont->links);
+		test_pointer_array(fd, (void **)&cont->links, cont->totlinks);
 		if (cont->state_mask == 0)
 			cont->state_mask = 1;
 	}
@@ -5610,8 +5663,8 @@ static void lib_link_scene(FileData *fd, Main *main)
 		if (sce->id.tag & LIB_TAG_NEED_LINK) {
 			/* Link ID Properties -- and copy this comment EXACTLY for easy finding
 			 * of library blocks that implement this.*/
-			IDP_LibLinkProperty(sce->id.properties, (fd->flags & FD_FLAGS_SWITCH_ENDIAN), fd);
 			lib_link_animdata(fd, &sce->id, sce->adt);
+			IDP_LibLinkProperty(sce->id.properties, fd);
 			
 			lib_link_keyingsets(fd, &sce->id, &sce->keyingsets);
 			
@@ -6172,6 +6225,7 @@ static void lib_link_windowmanager(FileData *fd, Main *main)
 	
 	for (wm = main->wm.first; wm; wm = wm->id.next) {
 		if (wm->id.tag & LIB_TAG_NEED_LINK) {
+			IDP_LibLinkProperty(wm->id.properties, fd);
 			for (win = wm->windows.first; win; win = win->next)
 				win->screen = newlibadr(fd, NULL, win->screen);
 			
@@ -6269,6 +6323,8 @@ static void lib_link_screen(FileData *fd, Main *main)
 			sc->animtimer = NULL; /* saved in rare cases */
 			sc->scrubbing = false;
 			
+			IDP_LibLinkProperty(sc->id.properties, fd);
+
 			for (sa = sc->areabase.first; sa; sa = sa->next) {
 				SpaceLink *sl;
 				
@@ -7269,11 +7325,12 @@ static void direct_link_library(FileData *fd, Library *lib, Main *main)
 	lib->parent = NULL;
 }
 
-static void lib_link_library(FileData *UNUSED(fd), Main *main)
+static void lib_link_library(FileData *fd, Main *main)
 {
 	Library *lib;
 	for (lib = main->library.first; lib; lib = lib->id.next) {
 		id_us_ensure_real(&lib->id);
+		IDP_LibLinkProperty(lib->id.properties, fd);
 	}
 }
 
@@ -7315,6 +7372,7 @@ static void lib_link_speaker(FileData *fd, Main *main)
 	for (spk = main->speaker.first; spk; spk = spk->id.next) {
 		if (spk->id.tag & LIB_TAG_NEED_LINK) {
 			lib_link_animdata(fd, &spk->id, spk->adt);
+			IDP_LibLinkProperty(spk->id.properties, fd);
 			
 			spk->sound = newlibadr_us(fd, spk->id.lib, spk->sound);
 			spk->id.tag &= ~LIB_TAG_NEED_LINK;
@@ -7370,6 +7428,7 @@ static void lib_link_sound(FileData *fd, Main *main)
 	
 	for (sound = main->sound.first; sound; sound = sound->id.next) {
 		if (sound->id.tag & LIB_TAG_NEED_LINK) {
+			IDP_LibLinkProperty(sound->id.properties, fd);
 			sound->id.tag &= ~LIB_TAG_NEED_LINK;
 			sound->ipo = newlibadr_us(fd, sound->id.lib, sound->ipo); // XXX deprecated - old animation system
 			
@@ -7394,6 +7453,7 @@ static void lib_link_group(FileData *fd, Main *main)
 	
 	for (group = main->group.first; group; group = group->id.next) {
 		if (group->id.tag & LIB_TAG_NEED_LINK) {
+			IDP_LibLinkProperty(group->id.properties, fd);
 			group->id.tag &= ~LIB_TAG_NEED_LINK;
 			
 			add_us = false;
@@ -7445,7 +7505,7 @@ static void direct_link_moviePlaneTracks(FileData *fd, ListBase *plane_tracks_ba
 		int i;
 
 		plane_track->point_tracks = newdataadr(fd, plane_track->point_tracks);
-		test_pointer_array(fd, (void**)&plane_track->point_tracks);
+		test_pointer_array(fd, (void**)&plane_track->point_tracks, plane_track->point_tracksnr);
 		for (i = 0; i < plane_track->point_tracksnr; i++) {
 			plane_track->point_tracks[i] = newdataadr(fd, plane_track->point_tracks[i]);
 		}
@@ -7522,6 +7582,7 @@ static void lib_link_movieclip(FileData *fd, Main *main)
 			MovieTrackingObject *object;
 
 			lib_link_animdata(fd, &clip->id, clip->adt);
+			IDP_LibLinkProperty(clip->id.properties, fd);
 			
 			clip->gpd = newlibadr_us(fd, clip->id.lib, clip->gpd);
 			
@@ -7613,6 +7674,7 @@ static void lib_link_mask(FileData *fd, Main *main)
 			MaskLayer *masklay;
 
 			lib_link_animdata(fd, &mask->id, mask->adt);
+			IDP_LibLinkProperty(mask->id.properties, fd);
 
 			for (masklay = mask->masklayers.first; masklay; masklay = masklay->next) {
 				MaskSpline *spline;
@@ -7653,8 +7715,8 @@ static void lib_link_linestyle(FileData *fd, Main *main)
 		if (linestyle->id.tag & LIB_TAG_NEED_LINK) {
 			linestyle->id.tag &= ~LIB_TAG_NEED_LINK;
 
-			IDP_LibLinkProperty(linestyle->id.properties, (fd->flags & FD_FLAGS_SWITCH_ENDIAN), fd);
 			lib_link_animdata(fd, &linestyle->id, linestyle->adt);
+			IDP_LibLinkProperty(linestyle->id.properties, fd);
 			for (m = linestyle->color_modifiers.first; m; m = m->next) {
 				switch (m->type) {
 				case LS_MODIFIER_DISTANCE_FROM_OBJECT:
@@ -8789,6 +8851,33 @@ static void expand_constraint_channels(FileData *fd, Main *mainvar, ListBase *ch
 	}
 }
 
+static void expand_idprops(FileData *fd, Main *mainvar, IDProperty *idprop)
+{
+	IDProperty *loop;
+	IDProperty *idp_loop;
+	int i;
+
+	if (!idprop) return;
+	BLI_assert(idprop->type == IDP_GROUP);
+
+	for (loop = idprop->data.group.first; loop; loop = loop->next) {
+		switch (loop->type)
+		{
+			case IDP_ID:
+				expand_doit(fd, mainvar, IDP_Id(loop));
+				break;
+			case IDP_IDPARRAY:
+				idp_loop = IDP_Array(loop);
+				for (i = 0; i < loop->totallen; i++)
+					expand_idprops(fd, mainvar, &idp_loop[i]);
+				break;
+			case IDP_GROUP:
+				expand_idprops(fd, mainvar, loop);
+				break;
+		}
+	}
+}
+
 static void expand_fmodifiers(FileData *fd, Main *mainvar, ListBase *list)
 {
 	FModifier *fcm;
@@ -8968,6 +9057,7 @@ static void expand_key(FileData *fd, Main *mainvar, Key *key)
 static void expand_nodetree(FileData *fd, Main *mainvar, bNodeTree *ntree)
 {
 	bNode *node;
+	bNodeSocket *sock;
 	
 	if (ntree->adt)
 		expand_animdata(fd, mainvar, ntree->adt);
@@ -8976,8 +9066,16 @@ static void expand_nodetree(FileData *fd, Main *mainvar, bNodeTree *ntree)
 		expand_doit(fd, mainvar, ntree->gpd);
 	
 	for (node = ntree->nodes.first; node; node = node->next) {
-		if (node->id && node->type != CMP_NODE_R_LAYERS)
+		if (node->id && node->type != CMP_NODE_R_LAYERS) {
 			expand_doit(fd, mainvar, node->id);
+
+			expand_idprops(fd, mainvar, node->prop);
+
+			for (sock = node->inputs.first; sock; sock = sock->next)
+				expand_doit(fd, mainvar, sock->prop);
+			for (sock = node->outputs.first; sock; sock = sock->next)
+				expand_doit(fd, mainvar, sock->prop);
+		}
 	}
 
 }
@@ -9217,6 +9315,7 @@ static void expand_pose(FileData *fd, Main *mainvar, bPose *pose)
 	
 	for (chan = pose->chanbase.first; chan; chan = chan->next) {
 		expand_constraints(fd, mainvar, &chan->constraints);
+		expand_idprops(fd, mainvar, chan->prop);
 		expand_doit(fd, mainvar, chan->custom);
 	}
 }
@@ -9705,6 +9804,8 @@ void BLO_expand_main(void *fdhandle, Main *mainvar)
 						expand_cachefile(fd, mainvar, (CacheFile *)id);
 						break;
 					}
+
+					expand_idprops(fd, mainvar, id->properties);
 					
 					do_it = true;
 					id->tag &= ~LIB_TAG_NEED_EXPAND;

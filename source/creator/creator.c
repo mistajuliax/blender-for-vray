@@ -64,6 +64,7 @@
 #include "BKE_sound.h"
 #include "BKE_image.h"
 #include "BKE_particle.h"
+#include "BKE_idprop.h"
 
 
 #include "IMB_imbuf.h"  /* for IMB_init */
@@ -356,6 +357,7 @@ int main(
 
 	BKE_blender_globals_init();  /* blender.c */
 
+	IDP_init();
 	IMB_init();
 	BKE_images_init();
 	BKE_modifier_init();

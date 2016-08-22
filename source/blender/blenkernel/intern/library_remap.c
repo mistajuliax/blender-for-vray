@@ -429,7 +429,7 @@ static void libblock_remap_data(
 		while (i--) {
 			ID *id_curr = lb_array[i]->first;
 
-			if (!id_curr || !BKE_library_idtype_can_use_idtype(GS(id_curr->name), GS(old_id->name))) {
+			if (!id_curr) {
 				continue;
 			}
 
@@ -818,6 +818,8 @@ void BKE_libblock_free_ex(Main *bmain, void *idv, const bool do_id_user)
 			BKE_cachefile_free((CacheFile *)id);
 			break;
 	}
+
+	IDP_unlinkIDLinks(id);
 
 	/* avoid notifying on removed data */
 	BKE_main_lock(bmain);

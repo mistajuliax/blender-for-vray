@@ -72,6 +72,7 @@
 #include "BKE_global.h"
 #include "BKE_group.h"
 #include "BKE_fcurve.h"
+#include "BKE_idprop.h"
 #include "BKE_lamp.h"
 #include "BKE_lattice.h"
 #include "BKE_library.h"
@@ -88,6 +89,7 @@
 #include "BKE_speaker.h"
 #include "BKE_texture.h"
 #include "BKE_editmesh.h"
+#include "BKE_library_remap.h"
 
 #include "WM_api.h"
 #include "WM_types.h"
@@ -1932,6 +1934,8 @@ static void single_obdata_users(Main *bmain, Scene *scene, const int flag)
 
 				id_us_min(id);
 				id->newid = ob->data;
+
+				IDP_RelinkProperty(id->newid->properties);
 			}
 		}
 	}

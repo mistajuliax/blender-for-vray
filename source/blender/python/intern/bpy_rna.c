@@ -1933,16 +1933,10 @@ static int pyrna_py_to_prop(
 					}
 					else {
 						/* data == NULL, assign to RNA */
-						if (value == Py_None) {
-							PointerRNA valueptr = {{NULL}};
-							RNA_property_pointer_set(ptr, prop, valueptr);
-						}
-						else if (RNA_struct_is_a(param->ptr.type, ptr_type)) {
-							RNA_property_pointer_set(ptr, prop, param->ptr);
-						}
-						else {
+						if (value == Py_None || RNA_struct_is_a(param->ptr.type, ptr_type))
+							RNA_property_pointer_set(ptr, prop, value == Py_None ? PointerRNA_NULL : param->ptr);
+						else
 							raise_error = true;
-						}
 					}
 
 					if (raise_error) {
@@ -6744,7 +6738,7 @@ PyObject *pyrna_id_CreatePyObject(ID *id)
 
 bool pyrna_id_FromPyObject(PyObject *obj, ID **id)
 {
-	if (BPy_StructRNA_Check(obj) && (RNA_struct_is_ID(((BPy_StructRNA *)obj)->ptr.type))) {
+	if (pyrna_id_CheckPyObject(obj)) {
 		*id = ((BPy_StructRNA *)obj)->ptr.id.data;
 		return true;
 	}
@@ -6752,6 +6746,11 @@ bool pyrna_id_FromPyObject(PyObject *obj, ID **id)
 		*id = NULL;
 		return false;
 	}
+}
+
+bool pyrna_id_CheckPyObject(PyObject *obj)
+{
+	return BPy_StructRNA_Check(obj) && (RNA_struct_is_ID(((BPy_StructRNA *) obj)->ptr.type));
 }
 
 void BPY_rna_init(void)
