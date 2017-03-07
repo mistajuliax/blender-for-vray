@@ -49,6 +49,7 @@
 #include "BKE_blender_version.h"  /* own include */
 #include "BKE_blendfile.h"
 #include "BKE_brush.h"
+#include "BKE_cachefile.h"
 #include "BKE_context.h"
 #include "BKE_depsgraph.h"
 #include "BKE_global.h"
@@ -86,6 +87,7 @@ void BKE_blender_free(void)
 	BKE_spacetypes_free();      /* after free main, it uses space callbacks */
 	
 	IMB_exit();
+	BKE_cachefiles_exit();
 	BKE_images_exit();
 	DAG_exit();
 
@@ -234,7 +236,7 @@ int BKE_blender_test_break(void)
  * \note Don't use MEM_mallocN so functions can be registered at any time.
  * \{ */
 
-struct AtExitData {
+static struct AtExitData {
 	struct AtExitData *next;
 
 	void (*func)(void *user_data);

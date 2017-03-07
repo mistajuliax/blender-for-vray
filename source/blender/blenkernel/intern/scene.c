@@ -56,6 +56,7 @@
 #include "BLI_utildefines.h"
 #include "BLI_callbacks.h"
 #include "BLI_string.h"
+#include "BLI_string_utils.h"
 #include "BLI_threads.h"
 #include "BLI_task.h"
 
@@ -78,6 +79,7 @@
 #include "BKE_idprop.h"
 #include "BKE_image.h"
 #include "BKE_library.h"
+#include "BKE_library_remap.h"
 #include "BKE_linestyle.h"
 #include "BKE_main.h"
 #include "BKE_mask.h"
@@ -186,8 +188,6 @@ Scene *BKE_scene_copy(Main *bmain, Scene *sce, int type)
 		scen = BKE_libblock_copy(bmain, &sce->id);
 		BLI_duplicatelist(&(scen->base), &(sce->base));
 		
-		BKE_main_id_clear_newpoins(bmain);
-		
 		id_us_plus((ID *)scen->world);
 		id_us_plus((ID *)scen->set);
 		/* id_us_plus((ID *)scen->gm.dome.warptext); */  /* XXX Not refcounted? see readfile.c */
@@ -211,7 +211,7 @@ Scene *BKE_scene_copy(Main *bmain, Scene *sce, int type)
 		if (sce->nodetree) {
 			/* ID's are managed on both copy and switch */
 			scen->nodetree = ntreeCopyTree(bmain, sce->nodetree);
-			ntreeSwitchID(scen->nodetree, &sce->id, &scen->id);
+			BKE_libblock_relink_ex(bmain, scen->nodetree, &sce->id, &scen->id, false);
 		}
 
 		obase = sce->base.first;
@@ -225,7 +225,7 @@ Scene *BKE_scene_copy(Main *bmain, Scene *sce, int type)
 		}
 
 		/* copy action and remove animation used by sequencer */
-		BKE_animdata_copy_id_action(&scen->id);
+		BKE_animdata_copy_id_action(&scen->id, false);
 
 		if (type != SCE_COPY_FULL)
 			remove_sequencer_fcurves(scen);
@@ -287,13 +287,16 @@ Scene *BKE_scene_copy(Main *bmain, Scene *sce, int type)
 		ts->imapaint.paintcursor = NULL;
 		id_us_plus((ID *)ts->imapaint.stencil);
 		ts->particle.paintcursor = NULL;
+		
 		/* duplicate Grease Pencil Drawing Brushes */
 		BLI_listbase_clear(&ts->gp_brushes);
 		for (bGPDbrush *brush = sce->toolsettings->gp_brushes.first; brush; brush = brush->next) {
 			bGPDbrush *newbrush = BKE_gpencil_brush_duplicate(brush);
 			BLI_addtail(&ts->gp_brushes, newbrush);
 		}
-
+		
+		/* duplicate Grease Pencil interpolation curve */
+		ts->gp_interpolate.custom_ipo = curvemapping_copy(ts->gp_interpolate.custom_ipo);
 	}
 	
 	/* make a private copy of the avicodecdata */
@@ -318,7 +321,7 @@ Scene *BKE_scene_copy(Main *bmain, Scene *sce, int type)
 
 	/*  camera */
 	if (type == SCE_COPY_LINK_DATA || type == SCE_COPY_FULL) {
-		ID_NEW(scen->camera);
+		ID_NEW_REMAP(scen->camera);
 	}
 	
 	/* before scene copy */
@@ -329,7 +332,7 @@ Scene *BKE_scene_copy(Main *bmain, Scene *sce, int type)
 		if (scen->world) {
 			id_us_plus((ID *)scen->world);
 			scen->world = BKE_world_copy(bmain, scen->world);
-			BKE_animdata_copy_id_action((ID *)scen->world);
+			BKE_animdata_copy_id_action((ID *)scen->world, false);
 		}
 
 		if (sce->ed) {
@@ -451,12 +454,17 @@ void BKE_scene_free(Scene *sce)
 			BKE_paint_free(&sce->toolsettings->uvsculpt->paint);
 			MEM_freeN(sce->toolsettings->uvsculpt);
 		}
+		BKE_paint_free(&sce->toolsettings->imapaint.paint);
+		
 		/* free Grease Pencil Drawing Brushes */
 		BKE_gpencil_free_brushes(&sce->toolsettings->gp_brushes);
 		BLI_freelistN(&sce->toolsettings->gp_brushes);
-
-		BKE_paint_free(&sce->toolsettings->imapaint.paint);
-
+		
+		/* free Grease Pencil interpolation curve */
+		if (sce->toolsettings->gp_interpolate.custom_ipo) {
+			curvemapping_free(sce->toolsettings->gp_interpolate.custom_ipo);
+		}
+		
 		MEM_freeN(sce->toolsettings);
 		sce->toolsettings = NULL;
 	}
@@ -830,6 +838,8 @@ Scene *BKE_scene_add(Main *bmain, const char *name)
 	Scene *sce;
 
 	sce = BKE_libblock_alloc(bmain, ID_SCE, name);
+	id_us_min(&sce->id);
+	id_us_ensure_real(&sce->id);
 
 	BKE_scene_init(sce);
 
@@ -915,7 +925,7 @@ Scene *BKE_scene_set_name(Main *bmain, const char *name)
 	Scene *sce = (Scene *)BKE_libblock_find_name_ex(bmain, ID_SCE, name);
 	if (sce) {
 		BKE_scene_set_background(bmain, sce);
-		printf("Scene switch: '%s' in file: '%s'\n", name, bmain->name);
+		printf("Scene switch for render: '%s' in file: '%s'\n", name, bmain->name);
 		return sce;
 	}
 
@@ -1511,8 +1521,6 @@ static void scene_update_object_func(TaskPool * __restrict pool, void *taskdata,
 		if (add_to_stats) {
 			StatisicsEntry *entry;
 
-			BLI_assert(threadid < BLI_pool_get_num_threads(pool));
-
 			entry = MEM_mallocN(sizeof(StatisicsEntry), "update thread statistics");
 			entry->object = object;
 			entry->start_time = start_time;
@@ -1570,10 +1578,11 @@ static void print_threads_statistics(ThreadedObjectUpdateState *state)
 #else
 	finish_time = PIL_check_seconds_timer();
 	tot_thread = BLI_system_thread_count();
+	int total_objects = 0;
 
 	for (i = 0; i < tot_thread; i++) {
-		int total_objects = 0;
-		double total_time = 0.0;
+		int thread_total_objects = 0;
+		double thread_total_time = 0.0;
 		StatisicsEntry *entry;
 
 		if (state->has_updated_objects) {
@@ -1582,11 +1591,14 @@ static void print_threads_statistics(ThreadedObjectUpdateState *state)
 			     entry;
 			     entry = entry->next)
 			{
-				total_objects++;
-				total_time += entry->duration;
+				thread_total_objects++;
+				thread_total_time += entry->duration;
 			}
 
-			printf("Thread %d: total %d objects in %f sec.\n", i, total_objects, total_time);
+			printf("Thread %d: total %d objects in %f sec.\n",
+			       i,
+			       thread_total_objects,
+			       thread_total_time);
 
 			for (entry = state->statistics[i].first;
 			     entry;
@@ -1594,12 +1606,16 @@ static void print_threads_statistics(ThreadedObjectUpdateState *state)
 			{
 				printf("  %s in %f sec\n", entry->object->id.name + 2, entry->duration);
 			}
+
+			total_objects += thread_total_objects;
 		}
 
 		BLI_freelistN(&state->statistics[i]);
 	}
 	if (state->has_updated_objects) {
-		printf("Scene update in %f sec\n", finish_time - state->base_time);
+		printf("Scene updated %d objects in %f sec\n",
+		       total_objects,
+		       finish_time - state->base_time);
 	}
 #endif
 }
@@ -2044,6 +2060,8 @@ bool BKE_scene_remove_render_layer(Main *bmain, Scene *scene, SceneRenderLayer *
 		/* ensure 1 layer is kept */
 		return false;
 	}
+
+	BKE_freestyle_config_free(&srl->freestyleConfig);
 
 	BLI_remlink(&scene->r.layers, srl);
 	MEM_freeN(srl);

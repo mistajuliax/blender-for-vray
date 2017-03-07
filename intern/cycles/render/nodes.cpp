@@ -27,6 +27,7 @@
 
 #include "util_sky_model.h"
 #include "util_foreach.h"
+#include "util_logging.h"
 #include "util_transform.h"
 
 CCL_NAMESPACE_BEGIN
@@ -263,7 +264,8 @@ ImageTextureNode::~ImageTextureNode()
 		image_manager->remove_image(filename.string(),
 		                            builtin_data,
 		                            interpolation,
-		                            extension);
+		                            extension,
+		                            use_alpha);
 	}
 }
 
@@ -462,7 +464,8 @@ EnvironmentTextureNode::~EnvironmentTextureNode()
 		image_manager->remove_image(filename.string(),
 		                            builtin_data,
 		                            interpolation,
-		                            EXTENSION_REPEAT);
+		                            EXTENSION_REPEAT,
+		                            use_alpha);
 	}
 }
 
@@ -1257,6 +1260,7 @@ NODE_DEFINE(BrickTextureNode)
 	SOCKET_IN_COLOR(mortar, "Mortar", make_float3(0.0f, 0.0f, 0.0f));
 	SOCKET_IN_FLOAT(scale, "Scale", 5.0f);
 	SOCKET_IN_FLOAT(mortar_size, "Mortar Size", 0.02f);
+	SOCKET_IN_FLOAT(mortar_smooth, "Mortar Smooth", 0.0f);
 	SOCKET_IN_FLOAT(bias, "Bias", 0.0f);
 	SOCKET_IN_FLOAT(brick_width, "Brick Width", 0.5f);
 	SOCKET_IN_FLOAT(row_height, "Row Height", 0.25f);
@@ -1280,6 +1284,7 @@ void BrickTextureNode::compile(SVMCompiler& compiler)
 	ShaderInput *mortar_in = input("Mortar");
 	ShaderInput *scale_in = input("Scale");
 	ShaderInput *mortar_size_in = input("Mortar Size");
+	ShaderInput *mortar_smooth_in = input("Mortar Smooth");
 	ShaderInput *bias_in = input("Bias");
 	ShaderInput *brick_width_in = input("Brick Width");
 	ShaderInput *row_height_in = input("Row Height");
@@ -1303,7 +1308,8 @@ void BrickTextureNode::compile(SVMCompiler& compiler)
 		compiler.encode_uchar4(
 			compiler.stack_assign_if_linked(row_height_in),
 			compiler.stack_assign_if_linked(color_out),
-			compiler.stack_assign_if_linked(fac_out)));
+			compiler.stack_assign_if_linked(fac_out),
+			compiler.stack_assign_if_linked(mortar_smooth_in)));
 			
 	compiler.add_node(compiler.encode_uchar4(offset_frequency, squash_frequency),
 		__float_as_int(scale),
@@ -1314,6 +1320,11 @@ void BrickTextureNode::compile(SVMCompiler& compiler)
 		__float_as_int(row_height),
 		__float_as_int(offset),
 		__float_as_int(squash));
+
+	compiler.add_node(__float_as_int(mortar_smooth),
+		SVM_STACK_INVALID,
+		SVM_STACK_INVALID,
+		SVM_STACK_INVALID);
 
 	tex_mapping.compile_end(compiler, vector_in, vector_offset);
 }
@@ -1373,7 +1384,8 @@ PointDensityTextureNode::~PointDensityTextureNode()
 		image_manager->remove_image(filename.string(),
 		                            builtin_data,
 		                            interpolation,
-		                            EXTENSION_CLIP);
+		                            EXTENSION_CLIP,
+		                            true);
 	}
 }
 
@@ -1434,14 +1446,14 @@ void PointDensityTextureNode::compile(SVMCompiler& compiler)
 		else {
 			if(use_density) {
 				compiler.add_node(NODE_VALUE_F,
-								  __float_as_int(0.0f),
-								  compiler.stack_assign(density_out));
+				                  __float_as_int(0.0f),
+				                  compiler.stack_assign(density_out));
 			}
 			if(use_color) {
 				compiler.add_node(NODE_VALUE_V, compiler.stack_assign(color_out));
 				compiler.add_node(NODE_VALUE_V, make_float3(TEX_IMAGE_MISSING_R,
-															TEX_IMAGE_MISSING_G,
-															TEX_IMAGE_MISSING_B));
+				                                            TEX_IMAGE_MISSING_G,
+				                                            TEX_IMAGE_MISSING_B));
 			}
 		}
 	}
@@ -1920,21 +1932,38 @@ GlossyBsdfNode::GlossyBsdfNode()
 void GlossyBsdfNode::simplify_settings(Scene *scene)
 {
 	if(distribution_orig == NBUILTIN_CLOSURES) {
+		roughness_orig = roughness;
 		distribution_orig = distribution;
 	}
+	else {
+		/* By default we use original values, so we don't worry about restoring
+		 * defaults later one and can only do override when needed.
+		 */
+		roughness = roughness_orig;
+		distribution = distribution_orig;
+	}
 	Integrator *integrator = scene->integrator;
+	ShaderInput *roughness_input = input("Roughness");
 	if(integrator->filter_glossy == 0.0f) {
 		/* Fallback to Sharp closure for Roughness close to 0.
 		 * Note: Keep the epsilon in sync with kernel!
 		 */
-		ShaderInput *roughness_input = input("Roughness");
 		if(!roughness_input->link && roughness <= 1e-4f) {
+			VLOG(1) << "Using sharp glossy BSDF.";
 			distribution = CLOSURE_BSDF_REFLECTION_ID;
 		}
 	}
 	else {
-		/* Rollback to original distribution when filter glossy is used. */
-		distribution = distribution_orig;
+		/* If filter glossy is used we replace Sharp glossy with GGX so we can
+		 * benefit from closure blur to remove unwanted noise.
+		 */
+		if(roughness_input->link == NULL &&
+		   distribution == CLOSURE_BSDF_REFLECTION_ID)
+		{
+			VLOG(1) << "Using GGX glossy with filter glossy.";
+			distribution = CLOSURE_BSDF_MICROFACET_GGX_ID;
+			roughness = 0.0f;
+		}
 	}
 	closure = distribution;
 }
@@ -1942,7 +1971,8 @@ void GlossyBsdfNode::simplify_settings(Scene *scene)
 bool GlossyBsdfNode::has_integrator_dependency()
 {
 	ShaderInput *roughness_input = input("Roughness");
-	return !roughness_input->link && roughness <= 1e-4f;
+	return !roughness_input->link &&
+	       (distribution == CLOSURE_BSDF_REFLECTION_ID || roughness <= 1e-4f);
 }
 
 void GlossyBsdfNode::compile(SVMCompiler& compiler)
@@ -1997,21 +2027,38 @@ GlassBsdfNode::GlassBsdfNode()
 void GlassBsdfNode::simplify_settings(Scene *scene)
 {
 	if(distribution_orig == NBUILTIN_CLOSURES) {
+		roughness_orig = roughness;
 		distribution_orig = distribution;
 	}
+	else {
+		/* By default we use original values, so we don't worry about restoring
+		 * defaults later one and can only do override when needed.
+		 */
+		roughness = roughness_orig;
+		distribution = distribution_orig;
+	}
 	Integrator *integrator = scene->integrator;
+	ShaderInput *roughness_input = input("Roughness");
 	if(integrator->filter_glossy == 0.0f) {
 		/* Fallback to Sharp closure for Roughness close to 0.
 		 * Note: Keep the epsilon in sync with kernel!
 		 */
-		ShaderInput *roughness_input = input("Roughness");
 		if(!roughness_input->link && roughness <= 1e-4f) {
+			VLOG(1) << "Using sharp glass BSDF.";
 			distribution = CLOSURE_BSDF_SHARP_GLASS_ID;
 		}
 	}
 	else {
-		/* Rollback to original distribution when filter glossy is used. */
-		distribution = distribution_orig;
+		/* If filter glossy is used we replace Sharp glossy with GGX so we can
+		 * benefit from closure blur to remove unwanted noise.
+		 */
+		if(roughness_input->link == NULL &&
+		   distribution == CLOSURE_BSDF_SHARP_GLASS_ID)
+		{
+			VLOG(1) << "Using GGX glass with filter glossy.";
+			distribution = CLOSURE_BSDF_MICROFACET_GGX_GLASS_ID;
+			roughness = 0.0f;
+		}
 	}
 	closure = distribution;
 }
@@ -2019,7 +2066,8 @@ void GlassBsdfNode::simplify_settings(Scene *scene)
 bool GlassBsdfNode::has_integrator_dependency()
 {
 	ShaderInput *roughness_input = input("Roughness");
-	return !roughness_input->link && roughness <= 1e-4f;
+	return !roughness_input->link &&
+	       (distribution == CLOSURE_BSDF_SHARP_GLASS_ID || roughness <= 1e-4f);
 }
 
 void GlassBsdfNode::compile(SVMCompiler& compiler)
@@ -2074,21 +2122,38 @@ RefractionBsdfNode::RefractionBsdfNode()
 void RefractionBsdfNode::simplify_settings(Scene *scene)
 {
 	if(distribution_orig == NBUILTIN_CLOSURES) {
+		roughness_orig = roughness;
 		distribution_orig = distribution;
 	}
+	else {
+		/* By default we use original values, so we don't worry about restoring
+		 * defaults later one and can only do override when needed.
+		 */
+		roughness = roughness_orig;
+		distribution = distribution_orig;
+	}
 	Integrator *integrator = scene->integrator;
+	ShaderInput *roughness_input = input("Roughness");
 	if(integrator->filter_glossy == 0.0f) {
 		/* Fallback to Sharp closure for Roughness close to 0.
 		 * Note: Keep the epsilon in sync with kernel!
 		 */
-		ShaderInput *roughness_input = input("Roughness");
 		if(!roughness_input->link && roughness <= 1e-4f) {
+			VLOG(1) << "Using sharp refraction BSDF.";
 			distribution = CLOSURE_BSDF_REFRACTION_ID;
 		}
 	}
 	else {
-		/* Rollback to original distribution when filter glossy is used. */
-		distribution = distribution_orig;
+		/* If filter glossy is used we replace Sharp glossy with GGX so we can
+		 * benefit from closure blur to remove unwanted noise.
+		 */
+		if(roughness_input->link == NULL &&
+		   distribution == CLOSURE_BSDF_REFRACTION_ID)
+		{
+			VLOG(1) << "Using GGX refraction with filter glossy.";
+			distribution = CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID;
+			roughness = 0.0f;
+		}
 	}
 	closure = distribution;
 }
@@ -2096,7 +2161,8 @@ void RefractionBsdfNode::simplify_settings(Scene *scene)
 bool RefractionBsdfNode::has_integrator_dependency()
 {
 	ShaderInput *roughness_input = input("Roughness");
-	return !roughness_input->link && roughness <= 1e-4f;
+	return !roughness_input->link &&
+	       (distribution == CLOSURE_BSDF_REFRACTION_ID || roughness <= 1e-4f);
 }
 
 void RefractionBsdfNode::compile(SVMCompiler& compiler)
@@ -2378,8 +2444,9 @@ void EmissionNode::constant_fold(const ConstantFolder& folder)
 	ShaderInput *color_in = input("Color");
 	ShaderInput *strength_in = input("Strength");
 
-	if ((!color_in->link && color == make_float3(0.0f, 0.0f, 0.0f)) ||
-	    (!strength_in->link && strength == 0.0f)) {
+	if((!color_in->link && color == make_float3(0.0f, 0.0f, 0.0f)) ||
+	   (!strength_in->link && strength == 0.0f))
+	{
 		folder.discard();
 	}
 }
@@ -2412,7 +2479,7 @@ void BackgroundNode::compile(SVMCompiler& compiler)
 	if(color_in->link || strength_in->link) {
 		compiler.add_node(NODE_EMISSION_WEIGHT,
 		                  compiler.stack_assign(color_in),
-						  compiler.stack_assign(strength_in));
+		                  compiler.stack_assign(strength_in));
 	}
 	else
 		compiler.add_node(NODE_CLOSURE_SET_WEIGHT, color*strength);
@@ -2430,8 +2497,9 @@ void BackgroundNode::constant_fold(const ConstantFolder& folder)
 	ShaderInput *color_in = input("Color");
 	ShaderInput *strength_in = input("Strength");
 
-	if ((!color_in->link && color == make_float3(0.0f, 0.0f, 0.0f)) ||
-	    (!strength_in->link && strength == 0.0f)) {
+	if((!color_in->link && color == make_float3(0.0f, 0.0f, 0.0f)) ||
+	   (!strength_in->link && strength == 0.0f))
+	{
 		folder.discard();
 	}
 }
@@ -3017,6 +3085,8 @@ NODE_DEFINE(LightPathNode)
 	SOCKET_OUT_FLOAT(is_volume_scatter_ray, "Is Volume Scatter Ray");
 	SOCKET_OUT_FLOAT(ray_length, "Ray Length");
 	SOCKET_OUT_FLOAT(ray_depth, "Ray Depth");
+	SOCKET_OUT_FLOAT(diffuse_depth, "Diffuse Depth");
+	SOCKET_OUT_FLOAT(glossy_depth, "Glossy Depth");
 	SOCKET_OUT_FLOAT(transparent_depth, "Transparent Depth");
 	SOCKET_OUT_FLOAT(transmission_depth, "Transmission Depth");
 
@@ -3081,6 +3151,16 @@ void LightPathNode::compile(SVMCompiler& compiler)
 	out = output("Ray Depth");
 	if(!out->links.empty()) {
 		compiler.add_node(NODE_LIGHT_PATH, NODE_LP_ray_depth, compiler.stack_assign(out));
+	}
+
+	out = output("Diffuse Depth");
+	if(!out->links.empty()) {
+		compiler.add_node(NODE_LIGHT_PATH, NODE_LP_ray_diffuse, compiler.stack_assign(out));
+	}
+
+	out = output("Glossy Depth");
+	if(!out->links.empty()) {
+		compiler.add_node(NODE_LIGHT_PATH, NODE_LP_ray_glossy, compiler.stack_assign(out));
 	}
 
 	out = output("Transparent Depth");
@@ -3896,6 +3976,19 @@ void GammaNode::constant_fold(const ConstantFolder& folder)
 	if(folder.all_inputs_constant()) {
 		folder.make_constant(svm_math_gamma_color(color, gamma));
 	}
+	else {
+		ShaderInput *color_in = input("Color");
+		ShaderInput *gamma_in = input("Gamma");
+
+		/* 1 ^ X == X ^ 0 == 1 */
+		if(folder.is_one(color_in) || folder.is_zero(gamma_in)) {
+			folder.make_one();
+		}
+		/* X ^ 1 == X */
+		else if(folder.is_one(gamma_in)) {
+			folder.try_bypass_or_make_constant(color_in, false);
+		}
+	}
 }
 
 void GammaNode::compile(SVMCompiler& compiler)
@@ -3970,7 +4063,7 @@ NODE_DEFINE(SeparateRGBNode)
 
 	SOCKET_IN_COLOR(color, "Image", make_float3(0.0f, 0.0f, 0.0f));
 
-	SOCKET_OUT_FLOAT(g, "R");
+	SOCKET_OUT_FLOAT(r, "R");
 	SOCKET_OUT_FLOAT(g, "G");
 	SOCKET_OUT_FLOAT(b, "B");
 
@@ -4762,6 +4855,7 @@ NODE_DEFINE(BumpNode)
 	NodeType* type = NodeType::add("bump", create, NodeType::SHADER);
 
 	SOCKET_BOOLEAN(invert, "Invert", false);
+	SOCKET_BOOLEAN(use_object_space, "UseObjectSpace", false);
 
 	/* this input is used by the user, but after graph transform it is no longer
 	 * used and moved to sampler center/x/y instead */
@@ -4800,7 +4894,8 @@ void BumpNode::compile(SVMCompiler& compiler)
 		compiler.encode_uchar4(
 			compiler.stack_assign_if_linked(normal_in),
 			compiler.stack_assign(distance_in),
-			invert),
+			invert,
+			use_object_space),
 		compiler.encode_uchar4(
 			compiler.stack_assign(center_in),
 			compiler.stack_assign(dx_in),
@@ -4812,6 +4907,7 @@ void BumpNode::compile(SVMCompiler& compiler)
 void BumpNode::compile(OSLCompiler& compiler)
 {
 	compiler.parameter(this, "invert");
+	compiler.parameter(this, "use_object_space");
 	compiler.add(this, "node_bump");
 }
 
@@ -4848,8 +4944,9 @@ void CurvesNode::constant_fold(const ConstantFolder& folder, ShaderInput *value_
 
 	/* evaluate fully constant node */
 	if(folder.all_inputs_constant()) {
-		if (curves.size() == 0)
+		if(curves.size() == 0) {
 			return;
+		}
 
 		float3 pos = (value - make_float3(min_x, min_x, min_x)) / (max_x - min_x);
 		float3 result;
@@ -5124,7 +5221,7 @@ OSLNode* OSLNode::create(size_t num_inputs, const OSLNode *from)
 	char *node_memory = (char*) operator new(node_size + inputs_size);
 	memset(node_memory, 0, node_size + inputs_size);
 
-	if (!from) {
+	if(!from) {
 		return new(node_memory) OSLNode();
 	}
 	else {

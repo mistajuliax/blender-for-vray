@@ -201,14 +201,14 @@ public:
 /* Node definition utility macros */
 
 #define SHADER_NODE_CLASS(type) \
-	NODE_DECLARE; \
+	NODE_DECLARE \
 	type(); \
 	virtual ShaderNode *clone() const { return new type(*this); } \
 	virtual void compile(SVMCompiler& compiler); \
 	virtual void compile(OSLCompiler& compiler); \
 
 #define SHADER_NODE_NO_CLONE_CLASS(type) \
-	NODE_DECLARE; \
+	NODE_DECLARE \
 	type(); \
 	virtual void compile(SVMCompiler& compiler); \
 	virtual void compile(OSLCompiler& compiler); \
@@ -258,7 +258,8 @@ public:
 	void finalize(Scene *scene,
 	              bool do_bump = false,
 	              bool do_osl = false,
-	              bool do_simplify = false);
+	              bool do_simplify = false,
+	              bool bump_in_object_space = false);
 
 	int get_num_closures();
 
@@ -272,7 +273,7 @@ protected:
 	void copy_nodes(ShaderNodeSet& nodes, ShaderNodeMap& nnodemap);
 
 	void break_cycles(ShaderNode *node, vector<bool>& visited, vector<bool>& on_stack);
-	void bump_from_displacement();
+	void bump_from_displacement(bool use_object_space);
 	void refine_bump_nodes();
 	void default_inputs(bool do_osl);
 	void transform_multi_closure(ShaderNode *node, ShaderOutput *weight_out, bool volume);

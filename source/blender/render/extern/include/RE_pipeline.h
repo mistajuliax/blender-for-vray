@@ -48,7 +48,6 @@ struct ReportList;
 struct Scene;
 struct SceneRenderLayer;
 struct EnvMap;
-struct RenderResult;
 struct StampData;
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
@@ -98,9 +97,10 @@ typedef struct RenderPass {
 } RenderPass;
 
 enum {
-	RENDER_PASS_DEBUG_BVH_TRAVERSAL_STEPS = 0,
+	RENDER_PASS_DEBUG_BVH_TRAVERSED_NODES = 0,
 	RENDER_PASS_DEBUG_BVH_TRAVERSED_INSTANCES = 1,
 	RENDER_PASS_DEBUG_RAY_BOUNCES = 2,
+	RENDER_PASS_DEBUG_BVH_INTERSECTIONS = 3,
 };
 
 /* a renderlayer is a full image, but with all passes and samples */
@@ -391,6 +391,8 @@ bool RE_HasFakeLayer(RenderResult *res);
 bool RE_RenderResult_is_stereo(RenderResult *res);
 struct RenderView *RE_RenderViewGetById(struct RenderResult *res, const int view_id);
 struct RenderView *RE_RenderViewGetByName(struct RenderResult *res, const char *viewname);
+
+RenderResult *RE_DuplicateRenderResult(RenderResult *rr);
 
 /******* Debug pass helper functions *********/
 

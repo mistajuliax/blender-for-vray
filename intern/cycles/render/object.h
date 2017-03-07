@@ -40,7 +40,7 @@ struct Transform;
 
 class Object : public Node {
 public:
-	NODE_DECLARE;
+	NODE_DECLARE
 
 	Mesh *mesh;
 	Transform tfm;
@@ -51,6 +51,7 @@ public:
 	uint visibility;
 	MotionTransform motion;
 	bool use_motion;
+	bool hide_on_missing_motion;
 	bool use_holdout;
 
 	float3 dupli_generated;

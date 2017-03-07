@@ -80,6 +80,7 @@ static DerivedMesh *navmesh_dm_createNavMeshForVisualization(DerivedMesh *dm);
 #include "GPU_shader.h"
 
 #ifdef WITH_OPENSUBDIV
+#  include "BKE_depsgraph.h"
 #  include "DNA_userdef_types.h"
 #endif
 
@@ -229,7 +230,9 @@ static MPoly *dm_dupPolyArray(DerivedMesh *dm)
 
 static int dm_getNumLoopTri(DerivedMesh *dm)
 {
-	return dm->looptris.num;
+	const int numlooptris = poly_to_tri_count(dm->getNumPolys(dm), dm->getNumLoops(dm));
+	BLI_assert(ELEM(dm->looptris.num, 0, numlooptris));
+	return numlooptris;
 }
 
 static CustomData *dm_getVertCData(DerivedMesh *dm)
@@ -2212,6 +2215,12 @@ static void mesh_calc_modifiers(
 		}
 	}
 
+	/* Some modifiers, like datatransfer, may generate those data as temp layer, we do not want to keep them,
+	 * as they are used by display code when available (i.e. even if autosmooth is disabled). */
+	if (!do_loop_normals && CustomData_has_layer(&finaldm->loopData, CD_NORMAL)) {
+		CustomData_free_layers(&finaldm->loopData, CD_NORMAL, finaldm->numLoopData);
+	}
+
 #ifdef WITH_GAMEENGINE
 	/* NavMesh - this is a hack but saves having a NavMesh modifier */
 	if ((ob->gameflag & OB_NAVMESH) && (finaldm->type == DM_TYPE_CDDM)) {
@@ -2282,7 +2291,7 @@ static void editbmesh_calc_modifiers(
 {
 	ModifierData *md, *previewmd = NULL;
 	float (*deformedVerts)[3] = NULL;
-	CustomDataMask mask, previewmask = 0, append_mask = 0;
+	CustomDataMask mask = 0, previewmask = 0, append_mask = 0;
 	DerivedMesh *dm = NULL, *orcodm = NULL;
 	int i, numVerts = 0, cageIndex = modifiers_getCageIndex(scene, ob, NULL, 1);
 	CDMaskLink *datamasks, *curr;
@@ -2547,6 +2556,15 @@ static void editbmesh_calc_modifiers(
 	/* same as mesh_calc_modifiers (if using loop normals, poly nors have already been computed). */
 	if (!do_loop_normals) {
 		dm_ensure_display_normals(*r_final);
+
+		/* Some modifiers, like datatransfer, may generate those data, we do not want to keep them,
+		 * as they are used by display code when available (i.e. even if autosmooth is disabled). */
+		if (CustomData_has_layer(&(*r_final)->loopData, CD_NORMAL)) {
+			CustomData_free_layers(&(*r_final)->loopData, CD_NORMAL, (*r_final)->numLoopData);
+		}
+		if (r_cage && CustomData_has_layer(&(*r_cage)->loopData, CD_NORMAL)) {
+			CustomData_free_layers(&(*r_cage)->loopData, CD_NORMAL, (*r_cage)->numLoopData);
+		}
 	}
 
 	/* add an orco layer if needed */
@@ -2565,15 +2583,28 @@ static void editbmesh_calc_modifiers(
  * we'll be using GPU backend of OpenSubdiv. This is so
  * playback performance is kept as high as possible.
  */
-static bool calc_modifiers_skip_orco(const Object *ob)
+static bool calc_modifiers_skip_orco(Scene *scene,
+                                     Object *ob,
+                                     bool use_render_params)
 {
-	const ModifierData *last_md = ob->modifiers.last;
+	ModifierData *last_md = ob->modifiers.last;
+	const int required_mode = use_render_params ? eModifierMode_Render : eModifierMode_Realtime;
 	if (last_md != NULL &&
-	    last_md->type == eModifierType_Subsurf)
+	    last_md->type == eModifierType_Subsurf &&
+	    modifier_isEnabled(scene, last_md, required_mode))
 	{
+		if (U.opensubdiv_compute_type == USER_OPENSUBDIV_COMPUTE_NONE) {
+			return false;
+		}
+		else if ((ob->mode & (OB_MODE_VERTEX_PAINT | OB_MODE_WEIGHT_PAINT | OB_MODE_TEXTURE_PAINT)) != 0) {
+			return false;
+		}
+		else if ((DAG_get_eval_flags_for_object(scene, ob) & DAG_EVAL_NEED_CPU) != 0) {
+			return false;
+		}
 		SubsurfModifierData *smd = (SubsurfModifierData *)last_md;
 		/* TODO(sergey): Deduplicate this with checks from subsurf_ccg.c. */
-		return smd->use_opensubdiv && U.opensubdiv_compute_type != USER_OPENSUBDIV_COMPUTE_NONE;
+		return smd->use_opensubdiv != 0;
 	}
 	return false;
 }
@@ -2589,7 +2620,7 @@ static void mesh_build_data(
 	BKE_object_sculpt_modifiers_changed(ob);
 
 #ifdef WITH_OPENSUBDIV
-	if (calc_modifiers_skip_orco(ob)) {
+	if (calc_modifiers_skip_orco(scene, ob, false)) {
 		dataMask &= ~(CD_MASK_ORCO | CD_MASK_PREVIEW_MCOL);
 	}
 #endif
@@ -2624,7 +2655,7 @@ static void editbmesh_build_data(Scene *scene, Object *obedit, BMEditMesh *em, C
 	BKE_editmesh_free_derivedmesh(em);
 
 #ifdef WITH_OPENSUBDIV
-	if (calc_modifiers_skip_orco(obedit)) {
+	if (calc_modifiers_skip_orco(scene, obedit, false)) {
 		dataMask &= ~(CD_MASK_ORCO | CD_MASK_PREVIEW_MCOL);
 	}
 #endif
@@ -3242,7 +3273,7 @@ void DM_calc_tangents_names_from_gpu(
 	*r_tangent_names_count = count;
 }
 
-static void DM_calc_loop_tangents_thread(TaskPool *UNUSED(pool), void *taskdata, int UNUSED(threadid))
+static void DM_calc_loop_tangents_thread(TaskPool * __restrict UNUSED(pool), void *taskdata, int UNUSED(threadid))
 {
 	struct SGLSLMeshToTangent *mesh2tangent = taskdata;
 	/* new computation method */
@@ -3460,13 +3491,17 @@ void DM_calc_loop_tangents(
 
 		/* Update active layer index */
 		uv_index = CustomData_get_layer_index_n(&dm->loopData, CD_MLOOPUV, act_uv_n);
-		tan_index = CustomData_get_named_layer_index(&dm->loopData, CD_TANGENT, dm->loopData.layers[uv_index].name);
-		CustomData_set_layer_active_index(&dm->loopData, CD_TANGENT, tan_index);
+		if (uv_index != -1) {
+			tan_index = CustomData_get_named_layer_index(&dm->loopData, CD_TANGENT, dm->loopData.layers[uv_index].name);
+			CustomData_set_layer_active_index(&dm->loopData, CD_TANGENT, tan_index);
+		}
 
 		/* Update render layer index */
 		uv_index = CustomData_get_layer_index_n(&dm->loopData, CD_MLOOPUV, ren_uv_n);
-		tan_index = CustomData_get_named_layer_index(&dm->loopData, CD_TANGENT, dm->loopData.layers[uv_index].name);
-		CustomData_set_layer_render_index(&dm->loopData, CD_TANGENT, tan_index);
+		if (uv_index != -1) {
+			tan_index = CustomData_get_named_layer_index(&dm->loopData, CD_TANGENT, dm->loopData.layers[uv_index].name);
+			CustomData_set_layer_render_index(&dm->loopData, CD_TANGENT, tan_index);
+		}
 	}
 }
 
@@ -3657,15 +3692,15 @@ void DM_vertex_attributes_from_gpu(DerivedMesh *dm, GPUVertexAttribs *gattribs, 
 			 * We do it based on the specified name.
 			 */
 			if (gattribs->layer[b].name[0]) {
-				layer = CustomData_get_named_layer_index(&dm->loopData, CD_TANGENT, gattribs->layer[b].name);
-				type = CD_TANGENT;
+				layer = CustomData_get_named_layer_index(ldata, CD_MLOOPUV, gattribs->layer[b].name);
+				type = CD_MTFACE;
 				if (layer == -1) {
 					layer = CustomData_get_named_layer_index(ldata, CD_MLOOPCOL, gattribs->layer[b].name);
 					type = CD_MCOL;
 				}
 				if (layer == -1) {
-					layer = CustomData_get_named_layer_index(ldata, CD_MLOOPUV, gattribs->layer[b].name);
-					type = CD_MTFACE;
+					layer = CustomData_get_named_layer_index(&dm->loopData, CD_TANGENT, gattribs->layer[b].name);
+					type = CD_TANGENT;
 				}
 				if (layer == -1) {
 					continue;
@@ -3793,7 +3828,6 @@ void DM_draw_attrib_vertex(DMVertexAttribs *attribs, int a, int index, int vert,
 			glTexCoord3fv(orco);
 		else
 			glVertexAttrib3fv(attribs->orco.gl_index, orco);
-		glUniform1i(attribs->orco.gl_info_index, 0);
 	}
 
 	/* uv texture coordinates */
@@ -3812,7 +3846,6 @@ void DM_draw_attrib_vertex(DMVertexAttribs *attribs, int a, int index, int vert,
 			glTexCoord2fv(uv);
 		else
 			glVertexAttrib2fv(attribs->tface[b].gl_index, uv);
-		glUniform1i(attribs->tface[b].gl_info_index, 0);
 	}
 
 	/* vertex colors */
@@ -3828,17 +3861,33 @@ void DM_draw_attrib_vertex(DMVertexAttribs *attribs, int a, int index, int vert,
 		}
 
 		glVertexAttrib4fv(attribs->mcol[b].gl_index, col);
-		glUniform1i(attribs->mcol[b].gl_info_index, GPU_ATTR_INFO_SRGB);
 	}
 
 	/* tangent for normal mapping */
 	for (b = 0; b < attribs->tottang; b++) {
 		if (attribs->tang[b].array) {
 			/*const*/ float (*array)[4] = attribs->tang[b].array;
-			const float *tang = (array) ? array[a * 4 + vert] : zero;
+			const float *tang = (array) ? array[loop] : zero;
 			glVertexAttrib4fv(attribs->tang[b].gl_index, tang);
 		}
-		glUniform1i(attribs->tang[b].gl_info_index, 0);
+	}
+}
+
+void DM_draw_attrib_vertex_uniforms(const DMVertexAttribs *attribs)
+{
+	int i;
+	if (attribs->totorco) {
+		glUniform1i(attribs->orco.gl_info_index, 0);
+	}
+	for (i = 0; i < attribs->tottface; i++) {
+		glUniform1i(attribs->tface[i].gl_info_index, 0);
+	}
+	for (i = 0; i < attribs->totmcol; i++) {
+		glUniform1i(attribs->mcol[i].gl_info_index, GPU_ATTR_INFO_SRGB);
+	}
+
+	for (i = 0; i < attribs->tottang; i++) {
+		glUniform1i(attribs->tang[i].gl_info_index, 0);
 	}
 }
 

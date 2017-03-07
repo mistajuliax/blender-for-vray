@@ -17,6 +17,9 @@
 #ifndef __BLENDER_UTIL_H__
 #define __BLENDER_UTIL_H__
 
+#include "mesh.h"
+
+#include "util_algorithm.h"
 #include "util_map.h"
 #include "util_path.h"
 #include "util_set.h"
@@ -46,25 +49,24 @@ static inline BL::Mesh object_to_mesh(BL::BlendData& data,
                                       bool apply_modifiers,
                                       bool render,
                                       bool calc_undeformed,
-                                      bool subdivision)
+                                      Mesh::SubdivisionType subdivision_type)
 {
 	bool subsurf_mod_show_render;
 	bool subsurf_mod_show_viewport;
 
-	if(subdivision) {
+	if(subdivision_type != Mesh::SUBDIVISION_NONE) {
 		BL::Modifier subsurf_mod = object.modifiers[object.modifiers.length()-1];
 
 		subsurf_mod_show_render = subsurf_mod.show_render();
-		subsurf_mod_show_viewport = subsurf_mod.show_render();
+		subsurf_mod_show_viewport = subsurf_mod.show_viewport();
 
 		subsurf_mod.show_render(false);
 		subsurf_mod.show_viewport(false);
-
 	}
 
 	BL::Mesh me = data.meshes.new_from_object(scene, object, apply_modifiers, (render)? 2: 1, false, calc_undeformed);
 
-	if(subdivision) {
+	if(subdivision_type != Mesh::SUBDIVISION_NONE) {
 		BL::Modifier subsurf_mod = object.modifiers[object.modifiers.length()-1];
 
 		subsurf_mod.show_render(subsurf_mod_show_render);
@@ -73,9 +75,14 @@ static inline BL::Mesh object_to_mesh(BL::BlendData& data,
 
 	if((bool)me) {
 		if(me.use_auto_smooth()) {
-			me.calc_normals_split();
+			if(subdivision_type == Mesh::SUBDIVISION_CATMULL_CLARK) {
+				me.calc_normals_split();
+			}
+			else {
+				me.split_faces(false);
+			}
 		}
-		if(!subdivision) {
+		if(subdivision_type == Mesh::SUBDIVISION_NONE) {
 			me.calc_tessface(true);
 		}
 	}
@@ -561,6 +568,29 @@ static inline BL::DomainFluidSettings object_fluid_domain_find(BL::Object b_ob)
 	return BL::DomainFluidSettings(PointerRNA_NULL);
 }
 
+static inline Mesh::SubdivisionType object_subdivision_type(BL::Object& b_ob, bool preview, bool experimental)
+{
+	PointerRNA cobj = RNA_pointer_get(&b_ob.ptr, "cycles");
+
+	if(cobj.data && b_ob.modifiers.length() > 0 && experimental) {
+		BL::Modifier mod = b_ob.modifiers[b_ob.modifiers.length()-1];
+		bool enabled = preview ? mod.show_viewport() : mod.show_render();
+
+		if(enabled && mod.type() == BL::Modifier::type_SUBSURF && RNA_boolean_get(&cobj, "use_adaptive_subdivision")) {
+			BL::SubsurfModifier subsurf(mod);
+
+			if(subsurf.subdivision_type() == BL::SubsurfModifier::subdivision_type_CATMULL_CLARK) {
+				return Mesh::SUBDIVISION_CATMULL_CLARK;
+			}
+			else {
+				return Mesh::SUBDIVISION_LINEAR;
+			}
+		}
+	}
+
+	return Mesh::SUBDIVISION_NONE;
+}
+
 /* ID Map
  *
  * Utility class to keep in sync with blender data.
@@ -755,6 +785,35 @@ struct ParticleSystemKey {
 
 		return false;
 	}
+};
+
+class EdgeMap {
+public:
+	EdgeMap() {
+	}
+
+	void clear() {
+		edges_.clear();
+	}
+
+	void insert(int v0, int v1) {
+		get_sorted_verts(v0, v1);
+		edges_.insert(std::pair<int, int>(v0, v1));
+	}
+
+	bool exists(int v0, int v1) {
+		get_sorted_verts(v0, v1);
+		return edges_.find(std::pair<int, int>(v0, v1)) != edges_.end();
+	}
+
+protected:
+	void get_sorted_verts(int& v0, int& v1) {
+		if(v0 > v1) {
+			swap(v0, v1);
+		}
+	}
+
+	set< std::pair<int, int> > edges_;
 };
 
 CCL_NAMESPACE_END

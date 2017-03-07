@@ -367,7 +367,6 @@ function(setup_liblinks
 	target_link_libraries(
 		${target}
 		${PNG_LIBRARIES}
-		${ZLIB_LIBRARIES}
 		${FREETYPE_LIBRARY}
 	)
 
@@ -424,15 +423,8 @@ function(setup_liblinks
 	if(WITH_OPENCOLORIO)
 		target_link_libraries(${target} ${OPENCOLORIO_LIBRARIES})
 	endif()
-	if(WITH_OPENSUBDIV)
-		if(WIN32 AND NOT UNIX)
-			file_list_suffix(OPENSUBDIV_LIBRARIES_DEBUG "${OPENSUBDIV_LIBRARIES}" "_d")
-			target_link_libraries_debug(${target} "${OPENSUBDIV_LIBRARIES_DEBUG}")
-			target_link_libraries_optimized(${target} "${OPENSUBDIV_LIBRARIES}")
-			unset(OPENSUBDIV_LIBRARIES_DEBUG)
-		else()
+	if(WITH_OPENSUBDIV OR WITH_CYCLES_OPENSUBDIV)
 			target_link_libraries(${target} ${OPENSUBDIV_LIBRARIES})
-		endif()
 	endif()
 	if(WITH_OPENVDB)
 		target_link_libraries(${target} ${OPENVDB_LIBRARIES} ${TBB_LIBRARIES})
@@ -539,11 +531,17 @@ function(setup_liblinks
 		endif()
 	endif()
 
+	target_link_libraries(
+		${target}
+		${ZLIB_LIBRARIES}
+	)
+
 	#system libraries with no dependencies such as platform link libs or opengl should go last
 	target_link_libraries(${target}
 			${BLENDER_GL_LIBRARIES})
 
-	target_link_libraries(${target} ${PLATFORM_LINKLIBS} ${CMAKE_DL_LIBS})
+	#target_link_libraries(${target} ${PLATFORM_LINKLIBS} ${CMAKE_DL_LIBS})
+	target_link_libraries(${target} ${PLATFORM_LINKLIBS})
 endfunction()
 
 
@@ -775,7 +773,7 @@ function(SETUP_BLENDER_SORTED_LIBS)
 		list(APPEND BLENDER_SORTED_LIBS bf_intern_gpudirect)
 	endif()
 
-	if(WITH_OPENSUBDIV)
+	if(WITH_OPENSUBDIV OR WITH_CYCLES_OPENSUBDIV)
 		list(APPEND BLENDER_SORTED_LIBS bf_intern_opensubdiv)
 	endif()
 
@@ -1608,3 +1606,26 @@ macro(openmp_delayload
 			endif(WITH_OPENMP)
 		endif(MSVC)
 endmacro()
+
+MACRO(WINDOWS_SIGN_TARGET target)
+	if (WITH_WINDOWS_CODESIGN)
+		if (!SIGNTOOL_EXE)
+			error("Codesigning is enabled, but signtool is not found")
+		else()
+			if (WINDOWS_CODESIGN_PFX_PASSWORD)
+				set(CODESIGNPASSWORD /p ${WINDOWS_CODESIGN_PFX_PASSWORD})
+			else()
+				if ($ENV{PFXPASSWORD})
+					set(CODESIGNPASSWORD /p $ENV{PFXPASSWORD})
+				else()
+					message( FATAL_ERROR "WITH_WINDOWS_CODESIGN is on but WINDOWS_CODESIGN_PFX_PASSWORD not set, and environment variable PFXPASSWORD not found, unable to sign code.")
+				endif()
+			endif()
+			add_custom_command(TARGET ${target}
+						POST_BUILD
+						COMMAND ${SIGNTOOL_EXE} sign /f ${WINDOWS_CODESIGN_PFX} ${CODESIGNPASSWORD} $<TARGET_FILE:${target}>
+						VERBATIM
+				)
+		endif()
+	endif()
+ENDMACRO()

@@ -41,6 +41,7 @@
 #include "BLI_math.h"
 #include "BLI_utildefines.h"
 #include "BLI_ghash.h"
+#include "BLI_string_utils.h"
 
 #include "BLT_translation.h"
 
@@ -910,7 +911,7 @@ static void copy_attr(Main *bmain, Scene *scene, View3D *v3d, short event)
 
 					base->object->dup_group = ob->dup_group;
 					if (ob->dup_group)
-						id_lib_extern(&ob->dup_group->id);
+						id_us_plus(&ob->dup_group->id);
 				}
 				else if (event == 7) {    /* mass */
 					base->object->mass = ob->mass;

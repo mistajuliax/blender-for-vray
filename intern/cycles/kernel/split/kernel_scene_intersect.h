@@ -109,15 +109,16 @@ ccl_device void kernel_scene_intersect(
 		lcg_state = lcg_state_init(&rng, &state, 0x51633e2d);
 	}
 
-	bool hit = scene_intersect(kg, &ray, visibility, isect, &lcg_state, difl, extmax);
+	bool hit = scene_intersect(kg, ray, visibility, isect, &lcg_state, difl, extmax);
 #else
-	bool hit = scene_intersect(kg, &ray, visibility, isect, NULL, 0.0f, 0.0f);
+	bool hit = scene_intersect(kg, ray, visibility, isect, NULL, 0.0f, 0.0f);
 #endif
 
 #ifdef __KERNEL_DEBUG__
 	if(state.flag & PATH_RAY_CAMERA) {
-		debug_data->num_bvh_traversal_steps += isect->num_traversal_steps;
+		debug_data->num_bvh_traversed_nodes += isect->num_traversed_nodes;
 		debug_data->num_bvh_traversed_instances += isect->num_traversed_instances;
+		debug_data->num_bvh_intersections += isect->num_intersections;
 	}
 	debug_data->num_ray_bounces++;
 #endif

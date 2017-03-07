@@ -93,6 +93,7 @@ ustring OSLRenderServices::u_geom_numpolyvertices("geom:numpolyvertices");
 ustring OSLRenderServices::u_geom_trianglevertices("geom:trianglevertices");
 ustring OSLRenderServices::u_geom_polyvertices("geom:polyvertices");
 ustring OSLRenderServices::u_geom_name("geom:name");
+ustring OSLRenderServices::u_geom_undisplaced("geom:undisplaced");
 ustring OSLRenderServices::u_is_smooth("geom:is_smooth");
 #ifdef __HAIR__
 ustring OSLRenderServices::u_is_curve("geom:is_curve");
@@ -101,6 +102,8 @@ ustring OSLRenderServices::u_curve_tangent_normal("geom:curve_tangent_normal");
 #endif
 ustring OSLRenderServices::u_path_ray_length("path:ray_length");
 ustring OSLRenderServices::u_path_ray_depth("path:ray_depth");
+ustring OSLRenderServices::u_path_diffuse_depth("path:diffuse_depth");
+ustring OSLRenderServices::u_path_glossy_depth("path:glossy_depth");
 ustring OSLRenderServices::u_path_transparent_depth("path:transparent_depth");
 ustring OSLRenderServices::u_path_transmission_depth("path:transmission_depth");
 ustring OSLRenderServices::u_trace("trace");
@@ -127,8 +130,10 @@ OSLRenderServices::OSLRenderServices()
 
 OSLRenderServices::~OSLRenderServices()
 {
-	VLOG(2) << "OSL texture system stats:\n"
-	        << osl_ts->getstats();
+	if(osl_ts) {
+		VLOG(2) << "OSL texture system stats:\n"
+		        << osl_ts->getstats();
+	}
 #ifdef WITH_PTEX
 	ptex_cache->release();
 #endif
@@ -165,6 +170,12 @@ bool OSLRenderServices::get_matrix(OSL::ShaderGlobals *sg, OSL::Matrix44 &result
 
 			return true;
 		}
+		else if(sd->type == PRIMITIVE_LAMP) {
+			Transform tfm = transform_transpose(sd->ob_tfm);
+			COPY_MATRIX44(&result, &tfm);
+
+			return true;
+		}
 	}
 
 	return false;
@@ -192,6 +203,12 @@ bool OSLRenderServices::get_inverse_matrix(OSL::ShaderGlobals *sg, OSL::Matrix44
 #endif
 			itfm = transform_transpose(itfm);
 			COPY_MATRIX44(&result, &itfm);
+
+			return true;
+		}
+		else if(sd->type == PRIMITIVE_LAMP) {
+			Transform tfm = transform_transpose(sd->ob_itfm);
+			COPY_MATRIX44(&result, &tfm);
 
 			return true;
 		}
@@ -284,6 +301,12 @@ bool OSLRenderServices::get_matrix(OSL::ShaderGlobals *sg, OSL::Matrix44 &result
 
 			return true;
 		}
+		else if(sd->type == PRIMITIVE_LAMP) {
+			Transform tfm = transform_transpose(sd->ob_tfm);
+			COPY_MATRIX44(&result, &tfm);
+
+			return true;
+		}
 	}
 
 	return false;
@@ -305,6 +328,12 @@ bool OSLRenderServices::get_inverse_matrix(OSL::ShaderGlobals *sg, OSL::Matrix44
 			Transform tfm = object_fetch_transform(kg, object, OBJECT_INVERSE_TRANSFORM);
 #endif
 			tfm = transform_transpose(tfm);
+			COPY_MATRIX44(&result, &tfm);
+
+			return true;
+		}
+		else if(sd->type == PRIMITIVE_LAMP) {
+			Transform tfm = transform_transpose(sd->ob_itfm);
 			COPY_MATRIX44(&result, &tfm);
 
 			return true;
@@ -683,7 +712,7 @@ bool OSLRenderServices::get_object_standard_attribute(KernelGlobals *kg, ShaderD
 		else
 			motion_triangle_vertices(kg, sd->object, sd->prim, sd->time, P);
 
-		if(!(sd->flag & SD_TRANSFORM_APPLIED)) {
+		if(!(sd->object_flag & SD_OBJECT_TRANSFORM_APPLIED)) {
 			object_position_transform(kg, sd, &P[0]);
 			object_position_transform(kg, sd, &P[1]);
 			object_position_transform(kg, sd, &P[2]);
@@ -730,6 +759,24 @@ bool OSLRenderServices::get_background_attribute(KernelGlobals *kg, ShaderData *
 		/* Ray Depth */
 		PathState *state = sd->osl_path_state;
 		int f = state->bounce;
+		return set_attribute_int(f, type, derivatives, val);
+	}
+	else if(name == u_path_diffuse_depth) {
+		/* Diffuse Ray Depth */
+		PathState *state = sd->osl_path_state;
+		int f = state->diffuse_bounce;
+		return set_attribute_int(f, type, derivatives, val);
+	}
+	else if(name == u_path_glossy_depth) {
+		/* Glossy Ray Depth */
+		PathState *state = sd->osl_path_state;
+		int f = state->glossy_bounce;
+		return set_attribute_int(f, type, derivatives, val);
+	}
+	else if(name == u_path_transmission_depth) {
+		/* Transmission Ray Depth */
+		PathState *state = sd->osl_path_state;
+		int f = state->transmission_bounce;
 		return set_attribute_int(f, type, derivatives, val);
 	}
 	else if(name == u_path_transparent_depth) {
@@ -1150,7 +1197,7 @@ bool OSLRenderServices::trace(TraceOpt &options, OSL::ShaderGlobals *sg,
 	tracedata->sd.osl_globals = sd->osl_globals;
 
 	/* raytrace */
-	return scene_intersect(sd->osl_globals, &ray, PATH_RAY_ALL_VISIBILITY, &tracedata->isect, NULL, 0.0f, 0.0f);
+	return scene_intersect(sd->osl_globals, ray, PATH_RAY_ALL_VISIBILITY, &tracedata->isect, NULL, 0.0f, 0.0f);
 }
 
 

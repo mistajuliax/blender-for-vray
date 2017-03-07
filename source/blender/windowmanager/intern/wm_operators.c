@@ -1377,11 +1377,12 @@ typedef struct wmOpPopUp {
 /* Only invoked by OK button in popups created with wm_block_dialog_create() */
 static void dialog_exec_cb(bContext *C, void *arg1, void *arg2)
 {
-	wmWindowManager *wm = CTX_wm_manager(C);
-	wmWindow *win = CTX_wm_window(C);
-
 	wmOpPopUp *data = arg1;
 	uiBlock *block = arg2;
+
+	/* Explicitly set UI_RETURN_OK flag, otherwise the menu might be cancelled
+	 * in case WM_operator_call_ex exits/reloads the current file (T49199). */
+	UI_popup_menu_retval_set(block, UI_RETURN_OK, true);
 
 	WM_operator_call_ex(C, data->op, true);
 
@@ -1392,8 +1393,18 @@ static void dialog_exec_cb(bContext *C, void *arg1, void *arg2)
 	/* in this case, wm_operator_ui_popup_cancel wont run */
 	MEM_freeN(data);
 
+	/* get context data *after* WM_operator_call_ex which might have closed the current file and changed context */
+	wmWindowManager *wm = CTX_wm_manager(C);
+	wmWindow *win = CTX_wm_window(C);
+
 	/* check window before 'block->handle' incase the
-	 * popup execution closed the window and freed the block. see T44688. */
+	 * popup execution closed the window and freed the block. see T44688.
+	 */
+	/* Post 2.78 TODO: Check if this fix and others related to T44688 are still
+	 * needed or can be improved now that requesting context data has been corrected
+	 * (see above). We're close to release so not a good time for experiments.
+	 * -- Julian
+	 */
 	if (BLI_findindex(&wm->windows, win) != -1) {
 		UI_popup_block_close(C, win, block);
 	}
@@ -1843,7 +1854,7 @@ static uiBlock *wm_block_create_splash(bContext *C, ARegion *ar, void *UNUSED(ar
 	             BLENDER_VERSION / 100, BLENDER_VERSION % 100);
 	uiItemStringO(col, IFACE_("Release Log"), ICON_URL, "WM_OT_url_open", "url", url);
 	uiItemStringO(col, IFACE_("Manual"), ICON_URL, "WM_OT_url_open", "url",
-	              "http://www.blender.org/manual");
+	              "https://docs.blender.org/manual/en/dev/");
 	uiItemStringO(col, IFACE_("Blender Website"), ICON_URL, "WM_OT_url_open", "url", "http://www.blender.org");
 	if (STREQ(STRINGIFY(BLENDER_VERSION_CYCLE), "release")) {
 		BLI_snprintf(url, sizeof(url), "http://www.blender.org/documentation/blender_python_api_%d_%d"
@@ -2296,6 +2307,11 @@ int WM_border_select_modal(bContext *C, wmOperator *op, const wmEvent *event)
 		}
 
 	}
+#ifdef WITH_INPUT_NDOF
+	else if (event->type == NDOF_MOTION) {
+		return OPERATOR_PASS_THROUGH;
+	}
+#endif
 //	/* Allow view navigation??? */
 //	else {
 //		return OPERATOR_PASS_THROUGH;
@@ -2410,6 +2426,11 @@ int WM_gesture_circle_modal(bContext *C, wmOperator *op, const wmEvent *event)
 				return OPERATOR_FINISHED; /* use finish or we don't get an undo */
 		}
 	}
+#ifdef WITH_INPUT_NDOF
+	else if (event->type == NDOF_MOTION) {
+		return OPERATOR_PASS_THROUGH;
+	}
+#endif
 	/* Allow view navigation??? */
 	/* note, this gives issues: 1) other modal ops run on top (border select), 2) middlemouse is used now 3) tablet/trackpad? */
 //	else {
@@ -2859,8 +2880,8 @@ void WM_OT_straightline_gesture(wmOperatorType *ot)
 
 /* *********************** radial control ****************** */
 
-#define WM_RADIAL_CONTROL_DISPLAY_SIZE (200)
-#define WM_RADIAL_CONTROL_DISPLAY_MIN_SIZE (35)
+#define WM_RADIAL_CONTROL_DISPLAY_SIZE (200 * UI_DPI_FAC)
+#define WM_RADIAL_CONTROL_DISPLAY_MIN_SIZE (35 * UI_DPI_FAC)
 #define WM_RADIAL_CONTROL_DISPLAY_WIDTH (WM_RADIAL_CONTROL_DISPLAY_SIZE - WM_RADIAL_CONTROL_DISPLAY_MIN_SIZE)
 #define WM_RADIAL_MAX_STR 10
 
@@ -3137,7 +3158,7 @@ static void radial_control_paint_cursor(bContext *C, int x, int y, void *customd
 	if (rmin > 0.0f)
 		glutil_draw_lined_arc(0.0, (float)(M_PI * 2.0), rmin, 40);
 
-	BLF_size(fontid, 1.5 * fstyle_points, 1.0f / U.dpi);
+	BLF_size(fontid, 1.5 * fstyle_points * U.pixelsize, U.dpi);
 	BLF_enable(fontid, BLF_SHADOW);
 	BLF_shadow(fontid, 3, (const float[4]){0.0f, 0.0f, 0.0f, 0.5f});
 	BLF_shadow_offset(fontid, 1, -1);
@@ -3897,8 +3918,12 @@ static void previews_id_ensure(bContext *C, Scene *scene, ID *id)
 	}
 }
 
-static int previews_id_ensure_callback(void *userdata, ID *UNUSED(self_id), ID **idptr, int UNUSED(cd_flag))
+static int previews_id_ensure_callback(void *userdata, ID *UNUSED(self_id), ID **idptr, int cb_flag)
 {
+	if (cb_flag & IDWALK_CB_PRIVATE) {
+		return IDWALK_RET_NOP;
+	}
+
 	PreviewsIDEnsureData *data = userdata;
 	ID *id = *idptr;
 
@@ -3931,7 +3956,7 @@ static int previews_ensure_exec(bContext *C, wmOperator *UNUSED(op))
 		preview_id_data.scene = scene;
 		id = (ID *)scene;
 
-		BKE_library_foreach_ID_link(id, previews_id_ensure_callback, &preview_id_data, IDWALK_RECURSE);
+		BKE_library_foreach_ID_link(NULL, id, previews_id_ensure_callback, &preview_id_data, IDWALK_RECURSE);
 	}
 
 	/* Check a last time for ID not used (fake users only, in theory), and
@@ -3950,9 +3975,9 @@ static int previews_ensure_exec(bContext *C, wmOperator *UNUSED(op))
 
 static void WM_OT_previews_ensure(wmOperatorType *ot)
 {
-	ot->name = "Refresh DataBlock Previews";
+	ot->name = "Refresh Data-Block Previews";
 	ot->idname = "WM_OT_previews_ensure";
-	ot->description = "Ensure datablock previews are available and up-to-date "
+	ot->description = "Ensure data-block previews are available and up-to-date "
 	                  "(to be saved in .blend file, only for some types like materials, textures, etc.)";
 
 	ot->exec = previews_ensure_exec;
@@ -4009,9 +4034,9 @@ static int previews_clear_exec(bContext *C, wmOperator *op)
 
 static void WM_OT_previews_clear(wmOperatorType *ot)
 {
-	ot->name = "Clear DataBlock Previews";
+	ot->name = "Clear Data-Block Previews";
 	ot->idname = "WM_OT_previews_clear";
-	ot->description = "Clear datablock previews (only for some types like objects, materials, textures, etc.)";
+	ot->description = "Clear data-block previews (only for some types like objects, materials, textures, etc.)";
 
 	ot->exec = previews_clear_exec;
 	ot->invoke = WM_menu_invoke;
@@ -4019,7 +4044,7 @@ static void WM_OT_previews_clear(wmOperatorType *ot)
 	ot->prop = RNA_def_enum_flag(ot->srna, "id_type", preview_id_type_items,
 	                             FILTER_ID_SCE | FILTER_ID_OB | FILTER_ID_GR |
 	                             FILTER_ID_MA | FILTER_ID_LA | FILTER_ID_WO | FILTER_ID_TE | FILTER_ID_IM,
-	                             "DataBlock Type", "Which datablock previews to clear");
+	                             "Data-Block Type", "Which data-block previews to clear");
 }
 
 /* *************************** Doc from UI ************* */
@@ -4545,4 +4570,3 @@ EnumPropertyItem *RNA_mask_local_itemf(bContext *C, PointerRNA *ptr, PropertyRNA
 {
 	return rna_id_itemf(C, ptr, r_free, C ? (ID *)CTX_data_main(C)->mask.first : NULL, true);
 }
-

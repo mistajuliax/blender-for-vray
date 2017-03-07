@@ -47,6 +47,7 @@ struct Main;
 struct MetaElem;
 struct Nurb;
 struct Object;
+struct RV3DMatrixStore;
 struct RegionView3D;
 struct Scene;
 struct ScrArea;
@@ -216,8 +217,14 @@ bool ED_view3d_win_to_ray_ex(
         const struct ARegion *ar, const struct View3D *v3d, const float mval[2],
         float r_ray_co[3], float r_ray_normal[3], float r_ray_start[3], bool do_clip);
 void ED_view3d_global_to_vector(const struct RegionView3D *rv3d, const float coord[3], float vec[3]);
-void ED_view3d_win_to_3d(const struct ARegion *ar, const float depth_pt[3], const float mval[2], float out[3]);
-void ED_view3d_win_to_3d_int(const struct ARegion *ar, const float depth_pt[3], const int mval[2], float out[3]);
+void ED_view3d_win_to_3d(
+        const struct View3D *v3d, const struct ARegion *ar,
+        const float depth_pt[3], const float mval[2],
+        float r_out[3]);
+void ED_view3d_win_to_3d_int(
+        const struct View3D *v3d, const struct ARegion *ar,
+        const float depth_pt[3], const int mval[2],
+        float r_out[3]);
 void ED_view3d_win_to_delta(const struct ARegion *ar, const float mval[2], float out[3], const float zfac);
 void ED_view3d_win_to_origin(const struct ARegion *ar, const float mval[2], float out[3]);
 void ED_view3d_win_to_vector(const struct ARegion *ar, const float mval[2], float out[3]);
@@ -324,8 +331,8 @@ void ED_view3d_check_mats_rv3d(struct RegionView3D *rv3d);
 #endif
 int ED_view3d_scene_layer_set(int lay, const int *values, int *active);
 
-void *ED_view3d_mats_rv3d_backup(struct RegionView3D *rv3d);
-void  ED_view3d_mats_rv3d_restore(struct RegionView3D *rv3d, void *rv3dmat_pt);
+struct RV3DMatrixStore *ED_view3d_mats_rv3d_backup(struct RegionView3D *rv3d);
+void                    ED_view3d_mats_rv3d_restore(struct RegionView3D *rv3d, struct RV3DMatrixStore *rv3dmat);
 
 bool ED_view3d_context_activate(struct bContext *C);
 void ED_view3d_draw_offscreen_init(struct Scene *scene, struct View3D *v3d);

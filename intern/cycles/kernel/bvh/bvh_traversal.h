@@ -40,21 +40,16 @@
  *
  */
 
-#ifndef __KERNEL_GPU__
-ccl_device
-#else
-ccl_device_inline
-#endif
-bool BVH_FUNCTION_FULL_NAME(BVH)(KernelGlobals *kg,
-                                 const Ray *ray,
-                                 Intersection *isect,
-                                 const uint visibility
+ccl_device_noinline bool BVH_FUNCTION_FULL_NAME(BVH)(KernelGlobals *kg,
+                                                     const Ray *ray,
+                                                     Intersection *isect,
+                                                     const uint visibility
 #if BVH_FEATURE(BVH_HAIR_MINIMUM_WIDTH)
-                                 , uint *lcg_state,
-                                 float difl,
-                                 float extmax
+                                                     , uint *lcg_state,
+                                                     float difl,
+                                                     float extmax
 #endif
-                                 )
+                                                     )
 {
 	/* todo:
 	 * - test if pushing distance on the stack helps (for non shadow rays)
@@ -218,7 +213,7 @@ bool BVH_FUNCTION_FULL_NAME(BVH)(KernelGlobals *kg,
 						--stack_ptr;
 					}
 				}
-				BVH_DEBUG_NEXT_STEP();
+				BVH_DEBUG_NEXT_NODE();
 			}
 
 			/* if node is leaf, fetch triangle list */
@@ -240,7 +235,7 @@ bool BVH_FUNCTION_FULL_NAME(BVH)(KernelGlobals *kg,
 					switch(type & PRIMITIVE_ALL) {
 						case PRIMITIVE_TRIANGLE: {
 							for(; prim_addr < prim_addr2; prim_addr++) {
-								BVH_DEBUG_NEXT_STEP();
+								BVH_DEBUG_NEXT_INTERSECTION();
 								kernel_assert(kernel_tex_fetch(__prim_type, prim_addr) == type);
 								if(triangle_intersect(kg,
 								                      &isect_precalc,
@@ -269,7 +264,7 @@ bool BVH_FUNCTION_FULL_NAME(BVH)(KernelGlobals *kg,
 #if BVH_FEATURE(BVH_MOTION)
 						case PRIMITIVE_MOTION_TRIANGLE: {
 							for(; prim_addr < prim_addr2; prim_addr++) {
-								BVH_DEBUG_NEXT_STEP();
+								BVH_DEBUG_NEXT_INTERSECTION();
 								kernel_assert(kernel_tex_fetch(__prim_type, prim_addr) == type);
 								if(motion_triangle_intersect(kg,
 								                             isect,
@@ -301,8 +296,9 @@ bool BVH_FUNCTION_FULL_NAME(BVH)(KernelGlobals *kg,
 						case PRIMITIVE_CURVE:
 						case PRIMITIVE_MOTION_CURVE: {
 							for(; prim_addr < prim_addr2; prim_addr++) {
-								BVH_DEBUG_NEXT_STEP();
-								kernel_assert(kernel_tex_fetch(__prim_type, prim_addr) == type);
+								BVH_DEBUG_NEXT_INTERSECTION();
+								const uint curve_type = kernel_tex_fetch(__prim_type, prim_addr);
+								kernel_assert((curve_type & PRIMITIVE_ALL) == (type & PRIMITIVE_ALL));
 								bool hit;
 								if(kernel_data.curve.curveflags & CURVE_KN_INTERPOLATE) {
 									hit = bvh_cardinal_curve_intersect(kg,
@@ -313,7 +309,7 @@ bool BVH_FUNCTION_FULL_NAME(BVH)(KernelGlobals *kg,
 									                                   object,
 									                                   prim_addr,
 									                                   ray->time,
-									                                   type,
+									                                   curve_type,
 									                                   lcg_state,
 									                                   difl,
 									                                   extmax);
@@ -327,7 +323,7 @@ bool BVH_FUNCTION_FULL_NAME(BVH)(KernelGlobals *kg,
 									                          object,
 									                          prim_addr,
 									                          ray->time,
-									                          type,
+									                          curve_type,
 									                          lcg_state,
 									                          difl,
 									                          extmax);

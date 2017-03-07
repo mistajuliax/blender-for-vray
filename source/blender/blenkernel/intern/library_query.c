@@ -85,11 +85,12 @@
 #define FOREACH_FINALIZE _finalize
 #define FOREACH_FINALIZE_VOID FOREACH_FINALIZE: (void)0
 
-#define FOREACH_CALLBACK_INVOKE_ID_PP(_data, id_pp, cb_flag) \
+#define FOREACH_CALLBACK_INVOKE_ID_PP(_data, id_pp, _cb_flag) \
+	CHECK_TYPE(id_pp, ID **); \
 	if (!((_data)->status & IDWALK_STOP)) { \
 		const int _flag = (_data)->flag; \
 		ID *old_id = *(id_pp); \
-		const int callback_return = (_data)->callback((_data)->user_data, (_data)->self_id, id_pp, cb_flag | (_data)->cd_flag); \
+		const int callback_return = (_data)->callback((_data)->user_data, (_data)->self_id, id_pp, _cb_flag | (_data)->cb_flag); \
 		if (_flag & IDWALK_READONLY) { \
 			BLI_assert(*(id_pp) == old_id); \
 		} \
@@ -130,7 +131,7 @@ enum {
 typedef struct LibraryForeachIDData {
 	ID *self_id;
 	int flag;
-	int cd_flag;
+	int cb_flag;
 	LibraryIDLinkCallback callback;
 	void *user_data;
 	int status;
@@ -146,20 +147,20 @@ static void library_foreach_idproperty_ID_link(LibraryForeachIDData *data, IDPro
         library_foreach_idproperty_ID_link(data, idp->id.properties, flag)
 
 static void library_foreach_rigidbodyworldSceneLooper(
-        struct RigidBodyWorld *UNUSED(rbw), ID **id_pointer, void *user_data, int cd_flag)
+        struct RigidBodyWorld *UNUSED(rbw), ID **id_pointer, void *user_data, int cb_flag)
 {
 	LibraryForeachIDData *data = (LibraryForeachIDData *) user_data;
-	FOREACH_CALLBACK_INVOKE_ID_PP(data, id_pointer, cd_flag);
+	FOREACH_CALLBACK_INVOKE_ID_PP(data, id_pointer, cb_flag);
 
 	FOREACH_FINALIZE_VOID;
 	library_foreach_idproperty_ID_link(data, (*id_pointer)->properties, data->flag);
 }
 
 static void library_foreach_modifiersForeachIDLink(
-        void *user_data, Object *UNUSED(object), ID **id_pointer, int cd_flag)
+        void *user_data, Object *UNUSED(object), ID **id_pointer, int cb_flag)
 {
 	LibraryForeachIDData *data = (LibraryForeachIDData *) user_data;
-	FOREACH_CALLBACK_INVOKE_ID_PP(data, id_pointer, cd_flag);
+	FOREACH_CALLBACK_INVOKE_ID_PP(data, id_pointer, cb_flag);
 
 	FOREACH_FINALIZE_VOID;
 	library_foreach_idproperty_ID_link(data, (*id_pointer)->properties, data->flag);
@@ -169,48 +170,48 @@ static void library_foreach_constraintObjectLooper(bConstraint *UNUSED(con), ID 
                                                    bool is_reference, void *user_data)
 {
 	LibraryForeachIDData *data = (LibraryForeachIDData *) user_data;
-	const int cd_flag = is_reference ? IDWALK_USER : IDWALK_NOP;
-	FOREACH_CALLBACK_INVOKE_ID_PP(data, id_pointer, cd_flag);
+	const int cb_flag = is_reference ? IDWALK_CB_USER : IDWALK_CB_NOP;
+	FOREACH_CALLBACK_INVOKE_ID_PP(data, id_pointer, cb_flag);
 
 	FOREACH_FINALIZE_VOID;
 	library_foreach_idproperty_ID_link(data, (*id_pointer)->properties, data->flag);
 }
 
 static void library_foreach_particlesystemsObjectLooper(
-        ParticleSystem *UNUSED(psys), ID **id_pointer, void *user_data, int cd_flag)
+        ParticleSystem *UNUSED(psys), ID **id_pointer, void *user_data, int cb_flag)
 {
 	LibraryForeachIDData *data = (LibraryForeachIDData *) user_data;
-	FOREACH_CALLBACK_INVOKE_ID_PP(data, id_pointer, cd_flag);
+	FOREACH_CALLBACK_INVOKE_ID_PP(data, id_pointer, cb_flag);
 
 	FOREACH_FINALIZE_VOID;
 	library_foreach_idproperty_ID_link(data, (*id_pointer)->properties, data->flag);
 }
 
 static void library_foreach_sensorsObjectLooper(
-        bSensor *UNUSED(sensor), ID **id_pointer, void *user_data, int cd_flag)
+        bSensor *UNUSED(sensor), ID **id_pointer, void *user_data, int cb_flag)
 {
 	LibraryForeachIDData *data = (LibraryForeachIDData *) user_data;
-	FOREACH_CALLBACK_INVOKE_ID_PP(data, id_pointer, cd_flag);
+	FOREACH_CALLBACK_INVOKE_ID_PP(data, id_pointer, cb_flag);
 
 	FOREACH_FINALIZE_VOID;
 	library_foreach_idproperty_ID_link(data, (*id_pointer)->properties, data->flag);
 }
 
 static void library_foreach_controllersObjectLooper(
-        bController *UNUSED(controller), ID **id_pointer, void *user_data, int cd_flag)
+        bController *UNUSED(controller), ID **id_pointer, void *user_data, int cb_flag)
 {
 	LibraryForeachIDData *data = (LibraryForeachIDData *) user_data;
-	FOREACH_CALLBACK_INVOKE_ID_PP(data, id_pointer, cd_flag);
+	FOREACH_CALLBACK_INVOKE_ID_PP(data, id_pointer, cb_flag);
 
 	FOREACH_FINALIZE_VOID;
 	library_foreach_idproperty_ID_link(data, (*id_pointer)->properties, data->flag);
 }
 
 static void library_foreach_actuatorsObjectLooper(
-        bActuator *UNUSED(actuator), ID **id_pointer, void *user_data, int cd_flag)
+        bActuator *UNUSED(actuator), ID **id_pointer, void *user_data, int cb_flag)
 {
 	LibraryForeachIDData *data = (LibraryForeachIDData *) user_data;
-	FOREACH_CALLBACK_INVOKE_ID_PP(data, id_pointer, cd_flag);
+	FOREACH_CALLBACK_INVOKE_ID_PP(data, id_pointer, cb_flag);
 
 	FOREACH_FINALIZE_VOID;
 	library_foreach_idproperty_ID_link(data, (*id_pointer)->properties, data->flag);
@@ -220,7 +221,7 @@ static void library_foreach_nla_strip(LibraryForeachIDData *data, NlaStrip *stri
 {
 	NlaStrip *substrip;
 
-	FOREACH_CALLBACK_INVOKE(data, strip->act, IDWALK_USER);
+	FOREACH_CALLBACK_INVOKE(data, strip->act, IDWALK_CB_USER);
 	FOREACH_IDPROPERTY_ID_LINK(data, strip->act, data->flag);
 
 	for (substrip = strip->strips.first; substrip; substrip = substrip->next) {
@@ -244,7 +245,7 @@ static void library_foreach_animationData(LibraryForeachIDData *data, AnimData *
 			/* only used targets */
 			DRIVER_TARGETS_USED_LOOPER(dvar)
 			{
-				FOREACH_CALLBACK_INVOKE_ID(data, dtar->id, IDWALK_NOP);
+				FOREACH_CALLBACK_INVOKE_ID(data, dtar->id, IDWALK_CB_NOP);
 				if (dtar->id)
 					library_foreach_idproperty_ID_link(data, dtar->id->properties, data->flag);
 			}
@@ -252,8 +253,8 @@ static void library_foreach_animationData(LibraryForeachIDData *data, AnimData *
 		}
 	}
 
-	FOREACH_CALLBACK_INVOKE(data, adt->action, IDWALK_USER);
-	FOREACH_CALLBACK_INVOKE(data, adt->tmpact, IDWALK_USER);
+	FOREACH_CALLBACK_INVOKE(data, adt->action, IDWALK_CB_USER);
+	FOREACH_CALLBACK_INVOKE(data, adt->tmpact, IDWALK_CB_USER);
 	FOREACH_IDPROPERTY_ID_LINK(data, adt->action, data->flag);
 	FOREACH_IDPROPERTY_ID_LINK(data, adt->tmpact, data->flag);
 
@@ -268,8 +269,8 @@ static void library_foreach_animationData(LibraryForeachIDData *data, AnimData *
 
 static void library_foreach_mtex(LibraryForeachIDData *data, MTex *mtex)
 {
-	FOREACH_CALLBACK_INVOKE(data, mtex->object, IDWALK_NOP);
-	FOREACH_CALLBACK_INVOKE(data, mtex->tex, IDWALK_USER);
+	FOREACH_CALLBACK_INVOKE(data, mtex->object, IDWALK_CB_NOP);
+	FOREACH_CALLBACK_INVOKE(data, mtex->tex, IDWALK_CB_USER);
 
 	FOREACH_FINALIZE_VOID;
 	FOREACH_IDPROPERTY_ID_LINK(data,mtex->object, data->flag);
@@ -278,50 +279,72 @@ static void library_foreach_mtex(LibraryForeachIDData *data, MTex *mtex)
 
 static void library_foreach_paint(LibraryForeachIDData *data, Paint *paint)
 {
-	FOREACH_CALLBACK_INVOKE(data, paint->brush, IDWALK_USER);
-	FOREACH_CALLBACK_INVOKE(data, paint->palette, IDWALK_USER);
+	FOREACH_CALLBACK_INVOKE(data, paint->brush, IDWALK_CB_USER);
+	FOREACH_CALLBACK_INVOKE(data, paint->palette, IDWALK_CB_USER);
 
 	FOREACH_FINALIZE_VOID;
 	FOREACH_IDPROPERTY_ID_LINK(data, paint->brush, data->flag);
 	FOREACH_IDPROPERTY_ID_LINK(data, paint->palette, data->flag);
 }
 
-void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *user_data, int flag);
 
-static void library_foreach_idproperty_ID_link(LibraryForeachIDData *data, IDProperty *prop, int flag)
+void BKE_library_foreach_ID_link(Main *bmain, ID *id, LibraryIDLinkCallback callback, void *user_data, int flag);
+
+static void library_foreach_idproperty_ID_link(LibraryForeachIDData *data, IDProperty *prop, int flag) {
+	IDProperty *loop;
+	IDProperty **idp_loop;
+	int i;
+
+	if (!prop) return;
+
+	BLI_assert(prop->type == IDP_GROUP);
+
+	loop = prop->data.group.first;
+	while (loop) {
+		switch (loop->type) {
+		case IDP_GROUP:
+			library_foreach_idproperty_ID_link(data, loop, flag);
+			break;
+		case IDP_IDPARRAY:
+			idp_loop = IDP_Array(prop);
+			for (i = 0; i < prop->totallen; i++)
+				library_foreach_idproperty_ID_link(data, idp_loop[i], flag);
+			break;
+		case IDP_ID:
+			if (IDP_Id(loop)) {
+				ID* id = ((ID *)loop->data.pointer);
+				if (id) {
+					BKE_library_foreach_ID_link(NULL, id, data->callback, data->user_data, flag);
+					FOREACH_CALLBACK_INVOKE_ID(data, id, flag);
+					FOREACH_FINALIZE_VOID;
+				}
+			}
+			break;
+		}
+		loop = loop->next;
+	}
+}
+
+static void library_foreach_ID_as_subdata_link(ID **id_pp, LibraryIDLinkCallback callback, void *user_data, int flag, LibraryForeachIDData *data)
 {
-    IDProperty *loop;
-    IDProperty **idp_loop;
-    int i;
+	/* Needed e.g. for callbacks handling relationships... This call shall be absolutely readonly. */
+	ID *id = *id_pp;
+	FOREACH_CALLBACK_INVOKE_ID_PP(data, id_pp, IDWALK_CB_PRIVATE);
+	BLI_assert(id == *id_pp);
 
-    if (!prop) return;
+	if (flag & IDWALK_RECURSE) {
+		/* Defer handling into main loop, recursively calling BKE_library_foreach_ID_link in IDWALK_RECURSE case is
+		 * troublesome, see T49553. */
+		if (!BLI_gset_haskey(data->ids_handled, id)) {
+			BLI_gset_add(data->ids_handled, id);
+			BLI_LINKSTACK_PUSH(data->ids_todo, id);
+		}
+	}
+	else {
+		BKE_library_foreach_ID_link(NULL, id, callback, user_data, flag);
+	}
 
-    BLI_assert(prop->type == IDP_GROUP);
-
-    loop = prop->data.group.first;
-    while (loop) {
-        switch (loop->type) {
-            case IDP_GROUP:
-                library_foreach_idproperty_ID_link(data, loop, flag);
-                break;
-            case IDP_IDPARRAY:
-                idp_loop = IDP_Array(prop);
-                for (i = 0; i < prop->totallen; i++)
-                    library_foreach_idproperty_ID_link(data, idp_loop[i], flag);
-                break;
-            case IDP_ID:
-                if (IDP_Id(loop)) {
-                    ID* id = ((ID *) loop->data.pointer);
-                    if (id) {
-                        BKE_library_foreach_ID_link(id, data->callback, data->user_data, flag);
-                        FOREACH_CALLBACK_INVOKE_ID(data, id, flag);
-                        FOREACH_FINALIZE_VOID;
-                    }
-                }
-                break;
-        }
-        loop = loop->next;
-    }
+	FOREACH_FINALIZE_VOID;
 }
 
 /**
@@ -329,7 +352,7 @@ static void library_foreach_idproperty_ID_link(LibraryForeachIDData *data, IDPro
  *
  * \note: May be extended to be recursive in the future.
  */
-void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *user_data, int flag)
+void BKE_library_foreach_ID_link(Main *bmain, ID *id, LibraryIDLinkCallback callback, void *user_data, int flag)
 {
 	LibraryForeachIDData data;
 	int i;
@@ -340,6 +363,8 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 
 		data.ids_handled = BLI_gset_new(BLI_ghashutil_ptrhash, BLI_ghashutil_ptrcmp, __func__);
 		BLI_LINKSTACK_INIT(data.ids_todo);
+
+		BLI_gset_add(data.ids_handled, id);
 	}
 	else {
 		data.ids_handled = NULL;
@@ -362,9 +387,21 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 			FOREACH_IDPROPERTY_ID_LINK(&data, check_id_super, flag); \
 	}
 
-	do {
+	for (; id != NULL; id = (flag & IDWALK_RECURSE) ? BLI_LINKSTACK_POP(data.ids_todo) : NULL) {
 		data.self_id = id;
-		data.cd_flag = ID_IS_LINKED_DATABLOCK(id) ? IDWALK_INDIRECT_USAGE : 0;
+		data.cb_flag = ID_IS_LINKED_DATABLOCK(id) ? IDWALK_CB_INDIRECT_USAGE : 0;
+
+		if (bmain != NULL && bmain->relations != NULL && (flag & IDWALK_READONLY)) {
+			/* Note that this is minor optimization, even in worst cases (like id being an object with lots of
+			 * drivers and constraints and modifiers, or material etc. with huge node tree),
+			 * but we might as well use it (Main->relations is always assumed valid, it's responsability of code
+			 * creating it to free it, especially if/when it starts modifying Main database). */
+			MainIDRelationsEntry *entry = BLI_ghash_lookup(bmain->relations->id_user_to_used, id);
+			for (; entry != NULL; entry = entry->next) {
+				FOREACH_CALLBACK_INVOKE_ID_PP(&data, entry->id_pointer, entry->usage_flag);
+			}
+			continue;
+		}
 
 		AnimData *adt = BKE_animdata_from_id(id);
 		if (adt) {
@@ -375,8 +412,8 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 			case ID_LI:
 			{
 				Library *lib = (Library *) id;
-				FOREACH_IDPROPERTY_ID_LINK(&data, lib, IDWALK_USER);
-				CALLBACK_INVOKE(lib->parent, IDWALK_NOP);
+				FOREACH_IDPROPERTY_ID_LINK(&data, lib, IDWALK_CB_USER);
+				CALLBACK_INVOKE(lib->parent, IDWALK_CB_NOP);
 				break;
 			}
 			case ID_SCE:
@@ -386,40 +423,40 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 				SceneRenderLayer *srl;
 				Base *base;
 
-				CALLBACK_INVOKE(scene->camera, IDWALK_NOP);
-				CALLBACK_INVOKE(scene->world, IDWALK_USER);
-				CALLBACK_INVOKE(scene->set, IDWALK_NOP);
-				CALLBACK_INVOKE(scene->clip, IDWALK_USER);
-				FOREACH_IDPROPERTY_ID_LINK(&data, scene, IDWALK_USER);
+				CALLBACK_INVOKE(scene->camera, IDWALK_CB_NOP);
+				CALLBACK_INVOKE(scene->world, IDWALK_CB_USER);
+				CALLBACK_INVOKE(scene->set, IDWALK_CB_NOP);
+				CALLBACK_INVOKE(scene->clip, IDWALK_CB_USER);
+				FOREACH_IDPROPERTY_ID_LINK(&data, scene, IDWALK_CB_USER);
 				if (scene->nodetree) {
 					/* nodetree **are owned by IDs**, treat them as mere sub-data and not real ID! */
-					BKE_library_foreach_ID_link((ID *)scene->nodetree, callback, user_data, flag);
+					library_foreach_ID_as_subdata_link((ID **)&scene->nodetree, callback, user_data, flag, &data);
 				}
 				/* DO NOT handle scene->basact here, it's doubling with the loop over whole scene->base later,
 				 * since basact is just a pointer to one of those items. */
-				CALLBACK_INVOKE(scene->obedit, IDWALK_NOP);
+				CALLBACK_INVOKE(scene->obedit, IDWALK_CB_NOP);
 
 				for (srl = scene->r.layers.first; srl; srl = srl->next) {
 					FreestyleModuleConfig *fmc;
 					FreestyleLineSet *fls;
 
 					if (srl->mat_override) {
-						CALLBACK_INVOKE(srl->mat_override, IDWALK_USER);
+						CALLBACK_INVOKE(srl->mat_override, IDWALK_CB_USER);
 					}
 					if (srl->light_override) {
-						CALLBACK_INVOKE(srl->light_override, IDWALK_USER);
+						CALLBACK_INVOKE(srl->light_override, IDWALK_CB_USER);
 					}
 					for (fmc = srl->freestyleConfig.modules.first; fmc; fmc = fmc->next) {
 						if (fmc->script) {
-							CALLBACK_INVOKE(fmc->script, IDWALK_NOP);
+							CALLBACK_INVOKE(fmc->script, IDWALK_CB_NOP);
 						}
 					}
 					for (fls = srl->freestyleConfig.linesets.first; fls; fls = fls->next) {
 						if (fls->group) {
-							CALLBACK_INVOKE(fls->group, IDWALK_USER);
+							CALLBACK_INVOKE(fls->group, IDWALK_CB_USER);
 						}
 						if (fls->linestyle) {
-							CALLBACK_INVOKE(fls->linestyle, IDWALK_USER);
+							CALLBACK_INVOKE(fls->linestyle, IDWALK_CB_USER);
 						}
 					}
 				}
@@ -428,35 +465,39 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 					Sequence *seq;
 					SEQP_BEGIN(scene->ed, seq)
 					{
-						CALLBACK_INVOKE(seq->scene, IDWALK_NOP);
-						CALLBACK_INVOKE(seq->scene_camera, IDWALK_NOP);
-						CALLBACK_INVOKE(seq->clip, IDWALK_USER);
-						CALLBACK_INVOKE(seq->mask, IDWALK_USER);
-						CALLBACK_INVOKE(seq->sound, IDWALK_USER);
+						CALLBACK_INVOKE(seq->scene, IDWALK_CB_NOP);
+						CALLBACK_INVOKE(seq->scene_camera, IDWALK_CB_NOP);
+						CALLBACK_INVOKE(seq->clip, IDWALK_CB_USER);
+						CALLBACK_INVOKE(seq->mask, IDWALK_CB_USER);
+						CALLBACK_INVOKE(seq->sound, IDWALK_CB_USER);
 						for (SequenceModifierData *smd = seq->modifiers.first; smd; smd = smd->next) {
-							CALLBACK_INVOKE(smd->mask_id, IDWALK_USER);
+							CALLBACK_INVOKE(smd->mask_id, IDWALK_CB_USER);
 						}
 					}
 					SEQ_END
 				}
 
-				CALLBACK_INVOKE(scene->gpd, IDWALK_USER);
+				CALLBACK_INVOKE(scene->gpd, IDWALK_CB_USER);
 
 				for (base = scene->base.first; base; base = base->next) {
-					CALLBACK_INVOKE(base->object, IDWALK_USER);
+					CALLBACK_INVOKE(base->object, IDWALK_CB_USER);
+				}
+
+				for (TimeMarker *marker = scene->markers.first; marker; marker = marker->next) {
+					CALLBACK_INVOKE(marker->camera, IDWALK_CB_NOP);
 				}
 
 				if (toolsett) {
-					CALLBACK_INVOKE(toolsett->skgen_template, IDWALK_NOP);
+					CALLBACK_INVOKE(toolsett->skgen_template, IDWALK_CB_NOP);
 
-					CALLBACK_INVOKE(toolsett->particle.scene, IDWALK_NOP);
-					CALLBACK_INVOKE(toolsett->particle.object, IDWALK_NOP);
-					CALLBACK_INVOKE(toolsett->particle.shape_object, IDWALK_NOP);
+					CALLBACK_INVOKE(toolsett->particle.scene, IDWALK_CB_NOP);
+					CALLBACK_INVOKE(toolsett->particle.object, IDWALK_CB_NOP);
+					CALLBACK_INVOKE(toolsett->particle.shape_object, IDWALK_CB_NOP);
 
 					library_foreach_paint(&data, &toolsett->imapaint.paint);
-					CALLBACK_INVOKE(toolsett->imapaint.stencil, IDWALK_USER);
-					CALLBACK_INVOKE(toolsett->imapaint.clone, IDWALK_USER);
-					CALLBACK_INVOKE(toolsett->imapaint.canvas, IDWALK_USER);
+					CALLBACK_INVOKE(toolsett->imapaint.stencil, IDWALK_CB_USER);
+					CALLBACK_INVOKE(toolsett->imapaint.clone, IDWALK_CB_USER);
+					CALLBACK_INVOKE(toolsett->imapaint.canvas, IDWALK_CB_USER);
 
 					if (toolsett->vpaint) {
 						library_foreach_paint(&data, &toolsett->vpaint->paint);
@@ -466,7 +507,7 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 					}
 					if (toolsett->sculpt) {
 						library_foreach_paint(&data, &toolsett->sculpt->paint);
-						CALLBACK_INVOKE(toolsett->sculpt->gravity_object, IDWALK_NOP);
+						CALLBACK_INVOKE(toolsett->sculpt->gravity_object, IDWALK_CB_NOP);
 					}
 					if (toolsett->uvsculpt) {
 						library_foreach_paint(&data, &toolsett->uvsculpt->paint);
@@ -477,7 +518,7 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 					BKE_rigidbody_world_id_loop(scene->rigidbody_world, library_foreach_rigidbodyworldSceneLooper, &data);
 				}
 
-				CALLBACK_INVOKE(scene->gm.dome.warptext, IDWALK_NOP);
+				CALLBACK_INVOKE(scene->gm.dome.warptext, IDWALK_CB_NOP);
 
 				break;
 			}
@@ -485,79 +526,79 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 			case ID_OB:
 			{
 				Object *object = (Object *) id;
-				FOREACH_IDPROPERTY_ID_LINK(&data, object, data.cd_flag);
+				FOREACH_IDPROPERTY_ID_LINK(&data, object, data.cb_flag);
 				ParticleSystem *psys;
 
 				/* Object is special, proxies make things hard... */
-				const int data_cd_flag = data.cd_flag;
-				const int proxy_cd_flag = (object->proxy || object->proxy_group) ? IDWALK_INDIRECT_USAGE : 0;
+				const int data_cb_flag = data.cb_flag;
+				const int proxy_cb_flag = (object->proxy || object->proxy_group) ? IDWALK_CB_INDIRECT_USAGE : 0;
 
 				/* object data special case */
-				data.cd_flag |= proxy_cd_flag;
+				data.cb_flag |= proxy_cb_flag;
 				if (object->type == OB_EMPTY) {
 					/* empty can have NULL or Image */
-					CALLBACK_INVOKE_ID(object->data, IDWALK_USER);
+					CALLBACK_INVOKE_ID(object->data, IDWALK_CB_USER);
 				}
 				else {
 					/* when set, this can't be NULL */
 					if (object->data) {
-						CALLBACK_INVOKE_ID(object->data, IDWALK_USER | IDWALK_NEVER_NULL);
+						CALLBACK_INVOKE_ID(object->data, IDWALK_CB_USER | IDWALK_CB_NEVER_NULL);
 					}
 				}
-				data.cd_flag = data_cd_flag;
+				data.cb_flag = data_cb_flag;
 
-				CALLBACK_INVOKE(object->parent, IDWALK_NOP);
-				CALLBACK_INVOKE(object->track, IDWALK_NOP);
+				CALLBACK_INVOKE(object->parent, IDWALK_CB_NOP);
+				CALLBACK_INVOKE(object->track, IDWALK_CB_NOP);
 				/* object->proxy is refcounted, but not object->proxy_group... *sigh* */
-				CALLBACK_INVOKE(object->proxy, IDWALK_USER);
-				CALLBACK_INVOKE(object->proxy_group, IDWALK_NOP);
+				CALLBACK_INVOKE(object->proxy, IDWALK_CB_USER);
+				CALLBACK_INVOKE(object->proxy_group, IDWALK_CB_NOP);
 
 				/* Special case!
 				 * Since this field is set/owned by 'user' of this ID (and not ID itself), it is only indirect usage
 				 * if proxy object is linked... Twisted. */
 				if (object->proxy_from) {
-					data.cd_flag = ID_IS_LINKED_DATABLOCK(object->proxy_from) ? IDWALK_INDIRECT_USAGE : 0;
+					data.cb_flag = ID_IS_LINKED_DATABLOCK(object->proxy_from) ? IDWALK_CB_INDIRECT_USAGE : 0;
 				}
-				CALLBACK_INVOKE(object->proxy_from, IDWALK_NOP);
-				data.cd_flag = data_cd_flag;
+				CALLBACK_INVOKE(object->proxy_from, IDWALK_CB_NOP);
+				data.cb_flag = data_cb_flag;
 
-				CALLBACK_INVOKE(object->poselib, IDWALK_USER);
+				CALLBACK_INVOKE(object->poselib, IDWALK_CB_USER);
 
-				data.cd_flag |= proxy_cd_flag;
+				data.cb_flag |= proxy_cb_flag;
 				for (i = 0; i < object->totcol; i++) {
-					CALLBACK_INVOKE(object->mat[i], IDWALK_USER);
+					CALLBACK_INVOKE(object->mat[i], IDWALK_CB_USER);
 				}
-				data.cd_flag = data_cd_flag;
+				data.cb_flag = data_cb_flag;
 
-				CALLBACK_INVOKE(object->gpd, IDWALK_USER);
-				CALLBACK_INVOKE(object->dup_group, IDWALK_USER);
+				CALLBACK_INVOKE(object->gpd, IDWALK_CB_USER);
+				CALLBACK_INVOKE(object->dup_group, IDWALK_CB_USER);
 
 				if (object->pd) {
-					CALLBACK_INVOKE(object->pd->tex, IDWALK_USER);
-					CALLBACK_INVOKE(object->pd->f_source, IDWALK_NOP);
+					CALLBACK_INVOKE(object->pd->tex, IDWALK_CB_USER);
+					CALLBACK_INVOKE(object->pd->f_source, IDWALK_CB_NOP);
 				}
 				/* Note that ob->effect is deprecated, so no need to handle it here. */
 
 				if (object->pose) {
 					bPoseChannel *pchan;
 
-					data.cd_flag |= proxy_cd_flag;
+					data.cb_flag |= proxy_cb_flag;
 					for (pchan = object->pose->chanbase.first; pchan; pchan = pchan->next) {
-						CALLBACK_INVOKE(pchan->custom, IDWALK_USER);
+						CALLBACK_INVOKE(pchan->custom, IDWALK_CB_USER);
 						BKE_constraints_id_loop(&pchan->constraints, library_foreach_constraintObjectLooper, &data);
 					}
-					data.cd_flag = data_cd_flag;
+					data.cb_flag = data_cb_flag;
 				}
 
 				if (object->rigidbody_constraint) {
-					CALLBACK_INVOKE(object->rigidbody_constraint->ob1, IDWALK_NOP);
-					CALLBACK_INVOKE(object->rigidbody_constraint->ob2, IDWALK_NOP);
+					CALLBACK_INVOKE(object->rigidbody_constraint->ob1, IDWALK_CB_NOP);
+					CALLBACK_INVOKE(object->rigidbody_constraint->ob2, IDWALK_CB_NOP);
 				}
 
 				if (object->lodlevels.first) {
 					LodLevel *level;
 					for (level = object->lodlevels.first; level; level = level->next) {
-						CALLBACK_INVOKE(level->source, IDWALK_NOP);
+						CALLBACK_INVOKE(level->source, IDWALK_CB_NOP);
 					}
 				}
 
@@ -569,10 +610,10 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 				}
 
 				if (object->soft) {
-					CALLBACK_INVOKE(object->soft->collision_group, IDWALK_NOP);
+					CALLBACK_INVOKE(object->soft->collision_group, IDWALK_CB_NOP);
 
 					if (object->soft->effector_weights) {
-						CALLBACK_INVOKE(object->soft->effector_weights->group, IDWALK_NOP);
+						CALLBACK_INVOKE(object->soft->effector_weights->group, IDWALK_CB_NOP);
 					}
 				}
 
@@ -585,11 +626,11 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 			case ID_ME:
 			{
 				Mesh *mesh = (Mesh *) id;
-				FOREACH_IDPROPERTY_ID_LINK(&data, mesh, data.cd_flag);
-				CALLBACK_INVOKE(mesh->texcomesh, IDWALK_USER);
-				CALLBACK_INVOKE(mesh->key, IDWALK_USER);
+				FOREACH_IDPROPERTY_ID_LINK(&data, mesh, data.cb_flag);
+				CALLBACK_INVOKE(mesh->texcomesh, IDWALK_CB_USER);
+				CALLBACK_INVOKE(mesh->key, IDWALK_CB_USER);
 				for (i = 0; i < mesh->totcol; i++) {
-					CALLBACK_INVOKE(mesh->mat[i], IDWALK_USER);
+					CALLBACK_INVOKE(mesh->mat[i], IDWALK_CB_USER);
 				}
 
 				/* XXX Really not happy with this - probably texface should rather use some kind of
@@ -601,7 +642,7 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 							MTexPoly *txface = (MTexPoly *)mesh->pdata.layers[i].data;
 
 							for (int j = 0; j < mesh->totpoly; j++, txface++) {
-								CALLBACK_INVOKE(txface->tpage, IDWALK_USER_ONE);
+								CALLBACK_INVOKE(txface->tpage, IDWALK_CB_USER_ONE);
 							}
 						}
 					}
@@ -611,7 +652,7 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 							MTFace *tface = (MTFace *)mesh->fdata.layers[i].data;
 
 							for (int j = 0; j < mesh->totface; j++, tface++) {
-								CALLBACK_INVOKE(tface->tpage, IDWALK_USER_ONE);
+								CALLBACK_INVOKE(tface->tpage, IDWALK_CB_USER_ONE);
 							}
 						}
 					}
@@ -622,17 +663,17 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 			case ID_CU:
 			{
 				Curve *curve = (Curve *) id;
-				CALLBACK_INVOKE(curve->bevobj, IDWALK_NOP);
-				CALLBACK_INVOKE(curve->taperobj, IDWALK_NOP);
-				CALLBACK_INVOKE(curve->textoncurve, IDWALK_NOP);
-				CALLBACK_INVOKE(curve->key, IDWALK_USER);
+				CALLBACK_INVOKE(curve->bevobj, IDWALK_CB_NOP);
+				CALLBACK_INVOKE(curve->taperobj, IDWALK_CB_NOP);
+				CALLBACK_INVOKE(curve->textoncurve, IDWALK_CB_NOP);
+				CALLBACK_INVOKE(curve->key, IDWALK_CB_USER);
 				for (i = 0; i < curve->totcol; i++) {
-					CALLBACK_INVOKE(curve->mat[i], IDWALK_USER);
+					CALLBACK_INVOKE(curve->mat[i], IDWALK_CB_USER);
 				}
-				CALLBACK_INVOKE(curve->vfont, IDWALK_USER);
-				CALLBACK_INVOKE(curve->vfontb, IDWALK_USER);
-				CALLBACK_INVOKE(curve->vfonti, IDWALK_USER);
-				CALLBACK_INVOKE(curve->vfontbi, IDWALK_USER);
+				CALLBACK_INVOKE(curve->vfont, IDWALK_CB_USER);
+				CALLBACK_INVOKE(curve->vfontb, IDWALK_CB_USER);
+				CALLBACK_INVOKE(curve->vfonti, IDWALK_CB_USER);
+				CALLBACK_INVOKE(curve->vfontbi, IDWALK_CB_USER);
 				break;
 			}
 
@@ -640,7 +681,7 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 			{
 				MetaBall *metaball = (MetaBall *) id;
 				for (i = 0; i < metaball->totcol; i++) {
-					CALLBACK_INVOKE(metaball->mat[i], IDWALK_USER);
+					CALLBACK_INVOKE(metaball->mat[i], IDWALK_CB_USER);
 				}
 				break;
 			}
@@ -655,9 +696,9 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 				}
 				if (material->nodetree) {
 					/* nodetree **are owned by IDs**, treat them as mere sub-data and not real ID! */
-					BKE_library_foreach_ID_link((ID *)material->nodetree, callback, user_data, flag);
+					library_foreach_ID_as_subdata_link((ID **)&material->nodetree, callback, user_data, flag, &data);
 				}
-				CALLBACK_INVOKE(material->group, IDWALK_USER);
+				CALLBACK_INVOKE(material->group, IDWALK_CB_USER);
 				break;
 			}
 
@@ -666,26 +707,26 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 				Tex *texture = (Tex *) id;
 				if (texture->nodetree) {
 					/* nodetree **are owned by IDs**, treat them as mere sub-data and not real ID! */
-					BKE_library_foreach_ID_link((ID *)texture->nodetree, callback, user_data, flag);
+					library_foreach_ID_as_subdata_link((ID **)&texture->nodetree, callback, user_data, flag, &data);
 				}
-				CALLBACK_INVOKE(texture->ima, IDWALK_USER);
+				CALLBACK_INVOKE(texture->ima, IDWALK_CB_USER);
 				if (texture->env) {
-					CALLBACK_INVOKE(texture->env->object, IDWALK_NOP);
-					CALLBACK_INVOKE(texture->env->ima, IDWALK_USER);
+					CALLBACK_INVOKE(texture->env->object, IDWALK_CB_NOP);
+					CALLBACK_INVOKE(texture->env->ima, IDWALK_CB_USER);
 				}
 				if (texture->pd)
-					CALLBACK_INVOKE(texture->pd->object, IDWALK_NOP);
+					CALLBACK_INVOKE(texture->pd->object, IDWALK_CB_NOP);
 				if (texture->vd)
-					CALLBACK_INVOKE(texture->vd->object, IDWALK_NOP);
+					CALLBACK_INVOKE(texture->vd->object, IDWALK_CB_NOP);
 				if (texture->ot)
-					CALLBACK_INVOKE(texture->ot->object, IDWALK_NOP);
+					CALLBACK_INVOKE(texture->ot->object, IDWALK_CB_NOP);
 				break;
 			}
 
 			case ID_LT:
 			{
 				Lattice *lattice = (Lattice *) id;
-				CALLBACK_INVOKE(lattice->key, IDWALK_USER);
+				CALLBACK_INVOKE(lattice->key, IDWALK_CB_USER);
 				break;
 			}
 
@@ -699,7 +740,7 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 				}
 				if (lamp->nodetree) {
 					/* nodetree **are owned by IDs**, treat them as mere sub-data and not real ID! */
-					BKE_library_foreach_ID_link((ID *)lamp->nodetree, callback, user_data, flag);
+					library_foreach_ID_as_subdata_link((ID **)&lamp->nodetree, callback, user_data, flag, &data);
 				}
 				break;
 			}
@@ -707,7 +748,7 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 			case ID_CA:
 			{
 				Camera *camera = (Camera *) id;
-				CALLBACK_INVOKE(camera->dof_ob, IDWALK_NOP);
+				CALLBACK_INVOKE(camera->dof_ob, IDWALK_CB_NOP);
 				break;
 			}
 
@@ -718,14 +759,14 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 				 * (see also foreach_libblock_id_users_callback).
 				 */
 				Key *key = (Key *) id;
-				CALLBACK_INVOKE_ID(key->from, IDWALK_NOP);
+				CALLBACK_INVOKE_ID(key->from, IDWALK_CB_NOP);
 				break;
 			}
 
 			case ID_SCR:
 			{
 				bScreen *screen = (bScreen *) id;
-				CALLBACK_INVOKE(screen->scene, IDWALK_USER_ONE);
+				CALLBACK_INVOKE(screen->scene, IDWALK_CB_USER_ONE);
 				break;
 			}
 
@@ -739,7 +780,7 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 				}
 				if (world->nodetree) {
 					/* nodetree **are owned by IDs**, treat them as mere sub-data and not real ID! */
-					BKE_library_foreach_ID_link((ID *)world->nodetree, callback, user_data, flag);
+					library_foreach_ID_as_subdata_link((ID **)&world->nodetree, callback, user_data, flag, &data);
 				}
 				break;
 			}
@@ -747,7 +788,7 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 			case ID_SPK:
 			{
 				Speaker *speaker = (Speaker *) id;
-				CALLBACK_INVOKE(speaker->sound, IDWALK_USER);
+				CALLBACK_INVOKE(speaker->sound, IDWALK_CB_USER);
 				break;
 			}
 
@@ -756,7 +797,7 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 				Group *group = (Group *) id;
 				GroupObject *gob;
 				for (gob = group->gobject.first; gob; gob = gob->next) {
-					CALLBACK_INVOKE(gob->ob, IDWALK_USER_ONE);
+					CALLBACK_INVOKE(gob->ob, IDWALK_CB_USER_ONE);
 				}
 				break;
 			}
@@ -765,11 +806,11 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 			{
 				bNodeTree *ntree = (bNodeTree *) id;
 				bNode *node;
-				FOREACH_IDPROPERTY_ID_LINK(&data, ntree, IDWALK_USER);
-				CALLBACK_INVOKE(ntree->gpd, IDWALK_USER);
+				FOREACH_IDPROPERTY_ID_LINK(&data, ntree, IDWALK_CB_USER);
+				CALLBACK_INVOKE(ntree->gpd, IDWALK_CB_USER);
 				for (node = ntree->nodes.first; node; node = node->next) {
-					CALLBACK_INVOKE_ID(node->id, IDWALK_USER);
-					library_foreach_idproperty_ID_link(&data, node->prop, IDWALK_USER);
+					CALLBACK_INVOKE_ID(node->id, IDWALK_CB_USER);
+					library_foreach_idproperty_ID_link(&data, node->prop, IDWALK_CB_USER);
 				}
 				break;
 			}
@@ -777,9 +818,9 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 			case ID_BR:
 			{
 				Brush *brush = (Brush *) id;
-				CALLBACK_INVOKE(brush->toggle_brush, IDWALK_NOP);
-				CALLBACK_INVOKE(brush->clone.image, IDWALK_NOP);
-				CALLBACK_INVOKE(brush->paint_curve, IDWALK_USER);
+				CALLBACK_INVOKE(brush->toggle_brush, IDWALK_CB_NOP);
+				CALLBACK_INVOKE(brush->clone.image, IDWALK_CB_NOP);
+				CALLBACK_INVOKE(brush->paint_curve, IDWALK_CB_USER);
 				library_foreach_mtex(&data, &brush->mtex);
 				library_foreach_mtex(&data, &brush->mask_mtex);
 				break;
@@ -788,10 +829,10 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 			case ID_PA:
 			{
 				ParticleSettings *psett = (ParticleSettings *) id;
-				CALLBACK_INVOKE(psett->dup_group, IDWALK_NOP);
-				CALLBACK_INVOKE(psett->dup_ob, IDWALK_NOP);
-				CALLBACK_INVOKE(psett->bb_ob, IDWALK_NOP);
-				CALLBACK_INVOKE(psett->collision_group, IDWALK_NOP);
+				CALLBACK_INVOKE(psett->dup_group, IDWALK_CB_NOP);
+				CALLBACK_INVOKE(psett->dup_ob, IDWALK_CB_NOP);
+				CALLBACK_INVOKE(psett->bb_ob, IDWALK_CB_NOP);
+				CALLBACK_INVOKE(psett->collision_group, IDWALK_CB_NOP);
 
 				for (i = 0; i < MAX_MTEX; i++) {
 					if (psett->mtex[i]) {
@@ -800,16 +841,16 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 				}
 
 				if (psett->effector_weights) {
-					CALLBACK_INVOKE(psett->effector_weights->group, IDWALK_NOP);
+					CALLBACK_INVOKE(psett->effector_weights->group, IDWALK_CB_NOP);
 				}
 
 				if (psett->pd) {
-					CALLBACK_INVOKE(psett->pd->tex, IDWALK_USER);
-					CALLBACK_INVOKE(psett->pd->f_source, IDWALK_NOP);
+					CALLBACK_INVOKE(psett->pd->tex, IDWALK_CB_USER);
+					CALLBACK_INVOKE(psett->pd->f_source, IDWALK_CB_NOP);
 				}
 				if (psett->pd2) {
-					CALLBACK_INVOKE(psett->pd2->tex, IDWALK_USER);
-					CALLBACK_INVOKE(psett->pd2->f_source, IDWALK_NOP);
+					CALLBACK_INVOKE(psett->pd2->tex, IDWALK_CB_USER);
+					CALLBACK_INVOKE(psett->pd2->f_source, IDWALK_CB_NOP);
 				}
 
 				if (psett->boids) {
@@ -820,11 +861,11 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 						for (rule = state->rules.first; rule; rule = rule->next) {
 							if (rule->type == eBoidRuleType_Avoid) {
 								BoidRuleGoalAvoid *gabr = (BoidRuleGoalAvoid *)rule;
-								CALLBACK_INVOKE(gabr->ob, IDWALK_NOP);
+								CALLBACK_INVOKE(gabr->ob, IDWALK_CB_NOP);
 							}
 							else if (rule->type == eBoidRuleType_FollowLeader) {
 								BoidRuleFollowLeader *flbr = (BoidRuleFollowLeader *)rule;
-								CALLBACK_INVOKE(flbr->ob, IDWALK_NOP);
+								CALLBACK_INVOKE(flbr->ob, IDWALK_CB_NOP);
 							}
 						}
 					}
@@ -840,19 +881,19 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 				MovieTrackingTrack *track;
 				MovieTrackingPlaneTrack *plane_track;
 
-				CALLBACK_INVOKE(clip->gpd, IDWALK_USER);
+				CALLBACK_INVOKE(clip->gpd, IDWALK_CB_USER);
 
 				for (track = tracking->tracks.first; track; track = track->next) {
-					CALLBACK_INVOKE(track->gpd, IDWALK_USER);
+					CALLBACK_INVOKE(track->gpd, IDWALK_CB_USER);
 				}
 				for (object = tracking->objects.first; object; object = object->next) {
 					for (track = object->tracks.first; track; track = track->next) {
-						CALLBACK_INVOKE(track->gpd, IDWALK_USER);
+						CALLBACK_INVOKE(track->gpd, IDWALK_CB_USER);
 					}
 				}
 
 				for (plane_track = tracking->plane_tracks.first; plane_track; plane_track = plane_track->next) {
-					CALLBACK_INVOKE(plane_track->image, IDWALK_USER);
+					CALLBACK_INVOKE(plane_track->image, IDWALK_CB_USER);
 				}
 				break;
 			}
@@ -867,7 +908,7 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 					for (mask_spline = mask_layer->splines.first; mask_spline; mask_spline = mask_spline->next) {
 						for (i = 0; i < mask_spline->tot_point; i++) {
 							MaskSplinePoint *point = &mask_spline->points[i];
-							CALLBACK_INVOKE_ID(point->parent.id, IDWALK_USER);
+							CALLBACK_INVOKE_ID(point->parent.id, IDWALK_CB_USER);
 						}
 					}
 				}
@@ -885,14 +926,14 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 				}
 				if (linestyle->nodetree) {
 					/* nodetree **are owned by IDs**, treat them as mere sub-data and not real ID! */
-					BKE_library_foreach_ID_link((ID *)linestyle->nodetree, callback, user_data, flag);
+					library_foreach_ID_as_subdata_link((ID **)&linestyle->nodetree, callback, user_data, flag, &data);
 				}
 
 				for (lsm = linestyle->color_modifiers.first; lsm; lsm = lsm->next) {
 					if (lsm->type == LS_MODIFIER_DISTANCE_FROM_OBJECT) {
 						LineStyleColorModifier_DistanceFromObject *p = (LineStyleColorModifier_DistanceFromObject *)lsm;
 						if (p->target) {
-							CALLBACK_INVOKE(p->target, IDWALK_NOP);
+							CALLBACK_INVOKE(p->target, IDWALK_CB_NOP);
 						}
 					}
 				}
@@ -900,7 +941,7 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 					if (lsm->type == LS_MODIFIER_DISTANCE_FROM_OBJECT) {
 						LineStyleAlphaModifier_DistanceFromObject *p = (LineStyleAlphaModifier_DistanceFromObject *)lsm;
 						if (p->target) {
-							CALLBACK_INVOKE(p->target, IDWALK_NOP);
+							CALLBACK_INVOKE(p->target, IDWALK_CB_NOP);
 						}
 					}
 				}
@@ -908,9 +949,18 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 					if (lsm->type == LS_MODIFIER_DISTANCE_FROM_OBJECT) {
 						LineStyleThicknessModifier_DistanceFromObject *p = (LineStyleThicknessModifier_DistanceFromObject *)lsm;
 						if (p->target) {
-							CALLBACK_INVOKE(p->target, IDWALK_NOP);
+							CALLBACK_INVOKE(p->target, IDWALK_CB_NOP);
 						}
 					}
+				}
+				break;
+			}
+			case ID_AC:
+			{
+				bAction *act = (bAction *) id;
+
+				for (TimeMarker *marker = act->markers.first; marker; marker = marker->next) {
+					CALLBACK_INVOKE(marker->camera, IDWALK_CB_NOP);
 				}
 				break;
 			}
@@ -921,7 +971,6 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 			case ID_TXT:
 			case ID_SO:
 			case ID_AR:
-			case ID_AC:
 			case ID_GD:
 			case ID_WM:
 			case ID_PAL:
@@ -934,7 +983,7 @@ void BKE_library_foreach_ID_link(ID *id, LibraryIDLinkCallback callback, void *u
 				break;
 
 		}
-	} while ((id = (flag & IDWALK_RECURSE) ? BLI_LINKSTACK_POP(data.ids_todo) : NULL));
+	}
 
 FOREACH_FINALIZE:
 	if (data.ids_handled) {
@@ -952,16 +1001,111 @@ FOREACH_FINALIZE:
 /**
  * re-usable function, use when replacing ID's
  */
-void BKE_library_update_ID_link_user(ID *id_dst, ID *id_src, const int cd_flag)
+void BKE_library_update_ID_link_user(ID *id_dst, ID *id_src, const int cb_flag)
 {
-	if (cd_flag & IDWALK_USER) {
+	if (cb_flag & IDWALK_CB_USER) {
 		id_us_min(id_src);
 		id_us_plus(id_dst);
 	}
-	else if (cd_flag & IDWALK_USER_ONE) {
+	else if (cb_flag & IDWALK_CB_USER_ONE) {
 		id_us_ensure_real(id_dst);
 	}
 }
+
+
+/**
+ * Say whether given \a id_type_owner can use (in any way) a datablock of \a id_type_used.
+ *
+ * This is a 'simplified' abstract version of #BKE_library_foreach_ID_link() above, quite useful to reduce
+ * useless iterations in some cases.
+ */
+/* XXX This has to be fully rethink, basing check on ID type is not really working anymore (and even worth once
+ *     IDProps will support ID pointers), we'll have to do some quick checks on IDs themselves... */
+bool BKE_library_idtype_can_use_idtype(const short id_type_owner, const short id_type_used)
+{
+	if (id_type_can_have_animdata(id_type_owner)) {
+		return true;  /* AnimationData can use virtually any kind of datablocks, through drivers especially. */
+	}
+
+	switch ((ID_Type)id_type_owner) {
+		case ID_LI:
+			return ELEM(id_type_used, ID_LI);
+		case ID_SCE:
+			return (ELEM(id_type_used, ID_OB, ID_WO, ID_SCE, ID_MC, ID_MA, ID_GR, ID_TXT,
+			                           ID_LS, ID_MSK, ID_SO, ID_GD, ID_BR, ID_PAL, ID_IM, ID_NT) ||
+			        BKE_library_idtype_can_use_idtype(ID_NT, id_type_used));
+		case ID_OB:
+			/* Could be the following, but simpler to just always say 'yes' here. */
+#if 0
+			return ELEM(id_type_used, ID_ME, ID_CU, ID_MB, ID_LT, ID_SPK, ID_AR, ID_LA, ID_CA,  /* obdata */
+			                          ID_OB, ID_MA, ID_GD, ID_GR, ID_TE, ID_PA, ID_TXT, ID_SO, ID_MC, ID_IM, ID_AC
+			                          /* + constraints, modifiers and game logic ID types... */);
+#else
+			return true;
+#endif
+		case ID_ME:
+			return ELEM(id_type_used, ID_ME, ID_KE, ID_MA);
+		case ID_CU:
+			return ELEM(id_type_used, ID_OB, ID_KE, ID_MA, ID_VF);
+		case ID_MB:
+			return ELEM(id_type_used, ID_MA);
+		case ID_MA:
+			return (ELEM(id_type_used, ID_TE, ID_GR) || BKE_library_idtype_can_use_idtype(ID_NT, id_type_used));
+		case ID_TE:
+			return (ELEM(id_type_used, ID_IM, ID_OB) || BKE_library_idtype_can_use_idtype(ID_NT, id_type_used));
+		case ID_LT:
+			return ELEM(id_type_used, ID_KE);
+		case ID_LA:
+			return (ELEM(id_type_used, ID_TE) || BKE_library_idtype_can_use_idtype(ID_NT, id_type_used));
+		case ID_CA:
+			return ELEM(id_type_used, ID_OB);
+		case ID_KE:
+			return ELEM(id_type_used, ID_ME, ID_CU, ID_LT);  /* Warning! key->from, could be more types in future? */
+		case ID_SCR:
+			return ELEM(id_type_used, ID_SCE);
+		case ID_WO:
+			return (ELEM(id_type_used, ID_TE) || BKE_library_idtype_can_use_idtype(ID_NT, id_type_used));
+		case ID_SPK:
+			return ELEM(id_type_used, ID_SO);
+		case ID_GR:
+			return ELEM(id_type_used, ID_OB);
+		case ID_NT:
+			/* Could be the following, but node.id has no type restriction... */
+#if 0
+			return ELEM(id_type_used, ID_GD /* + node.id types... */);
+#else
+			return true;
+#endif
+		case ID_BR:
+			return ELEM(id_type_used, ID_BR, ID_IM, ID_PC, ID_TE);
+		case ID_PA:
+			return ELEM(id_type_used, ID_OB, ID_GR, ID_TE);
+		case ID_MC:
+			return ELEM(id_type_used, ID_GD, ID_IM);
+		case ID_MSK:
+			return ELEM(id_type_used, ID_MC);  /* WARNING! mask->parent.id, not typed. */
+		case ID_LS:
+			return (ELEM(id_type_used, ID_TE, ID_OB) || BKE_library_idtype_can_use_idtype(ID_NT, id_type_used));
+		case ID_IM:
+		case ID_VF:
+		case ID_TXT:
+		case ID_SO:
+		case ID_AR:
+		case ID_AC:
+		case ID_GD:
+		case ID_WM:
+		case ID_PAL:
+		case ID_PC:
+		case ID_CF:
+			/* Those types never use/reference other IDs... */
+			return false;
+		case ID_IP:
+			/* Deprecated... */
+			return false;
+	}
+	return false;
+}
+
 
 /* ***** ID users iterator. ***** */
 typedef struct IDUsersIter {
@@ -978,26 +1122,32 @@ static int foreach_libblock_id_users_callback(void *user_data, ID *self_id, ID *
 {
 	IDUsersIter *iter = user_data;
 
-	/* XXX This is actually some kind of hack...
-	 * Issue is, only ID pointer from shapekeys is the 'from' one, which is not actually ID usage.
-	 * Maybe we should even nuke it from BKE_library_foreach_ID_link, not 100% sure yet...
-	 */
-	if (GS(self_id->name) == ID_KE) {
-		return IDWALK_RET_NOP;
-	}
-
-	if (*id_p && (*id_p == iter->id)) {
-#if 0
-		printf("%s uses %s (refcounted: %d, userone: %d, used_one: %d, used_one_active: %d, indirect_usage: %d)\n",
-		       iter->curr_id->name, iter->id->name, (cb_flag & IDWALK_USER) ? 1 : 0, (cb_flag & IDWALK_USER_ONE) ? 1 : 0,
-		       (iter->id->tag & LIB_TAG_EXTRAUSER) ? 1 : 0, (iter->id->tag & LIB_TAG_EXTRAUSER_SET) ? 1 : 0,
-		       (cb_flag & IDWALK_INDIRECT_USAGE) ? 1 : 0);
-#endif
-		if (cb_flag & IDWALK_INDIRECT_USAGE) {
-			iter->count_indirect++;
+	if (*id_p) {
+		/* XXX This is actually some kind of hack...
+		 * Issue is, shapekeys' 'from' ID pointer is not actually ID usage.
+		 * Maybe we should even nuke it from BKE_library_foreach_ID_link, not 100% sure yet...
+		 */
+		if ((GS(self_id->name) == ID_KE) && (((Key *)self_id)->from == *id_p)) {
+			return IDWALK_RET_NOP;
 		}
-		else {
-			iter->count_direct++;
+		/* XXX another hack, for similar reasons as above one. */
+		if ((GS(self_id->name) == ID_OB) && (((Object *)self_id)->proxy_from == (Object *)*id_p)) {
+			return IDWALK_RET_NOP;
+		}
+
+		if (*id_p == iter->id) {
+#if 0
+			printf("%s uses %s (refcounted: %d, userone: %d, used_one: %d, used_one_active: %d, indirect_usage: %d)\n",
+				   iter->curr_id->name, iter->id->name, (cb_flag & IDWALK_USER) ? 1 : 0, (cb_flag & IDWALK_USER_ONE) ? 1 : 0,
+				   (iter->id->tag & LIB_TAG_EXTRAUSER) ? 1 : 0, (iter->id->tag & LIB_TAG_EXTRAUSER_SET) ? 1 : 0,
+				   (cb_flag & IDWALK_INDIRECT_USAGE) ? 1 : 0);
+#endif
+			if (cb_flag & IDWALK_CB_INDIRECT_USAGE) {
+				iter->count_indirect++;
+			}
+			else {
+				iter->count_direct++;
+			}
 		}
 	}
 
@@ -1023,7 +1173,7 @@ int BKE_library_ID_use_ID(ID *id_user, ID *id_used)
 	iter.curr_id = id_user;
 	iter.count_direct = iter.count_indirect = 0;
 
-	BKE_library_foreach_ID_link(iter.curr_id, foreach_libblock_id_users_callback, (void *)&iter, IDWALK_NOP);
+	BKE_library_foreach_ID_link(NULL, iter.curr_id, foreach_libblock_id_users_callback, (void *)&iter, IDWALK_READONLY);
 
 	return iter.count_direct + iter.count_indirect;
 }
@@ -1052,7 +1202,7 @@ static bool library_ID_is_used(Main *bmain, void *idv, const bool check_linked)
 			}
 			iter.curr_id = id_curr;
 			BKE_library_foreach_ID_link(
-			            id_curr, foreach_libblock_id_users_callback, &iter, IDWALK_NOP);
+			            bmain, id_curr, foreach_libblock_id_users_callback, &iter, IDWALK_READONLY);
 
 			is_defined = ((check_linked ? iter.count_indirect : iter.count_direct) != 0);
 		}
@@ -1103,7 +1253,7 @@ void BKE_library_ID_test_usages(Main *bmain, void *idv, bool *is_used_local, boo
 				continue;
 			}
 			iter.curr_id = id_curr;
-			BKE_library_foreach_ID_link(id_curr, foreach_libblock_id_users_callback, &iter, IDWALK_NOP);
+			BKE_library_foreach_ID_link(bmain, id_curr, foreach_libblock_id_users_callback, &iter, IDWALK_READONLY);
 
 			is_defined = (iter.count_direct != 0 && iter.count_indirect != 0);
 		}
@@ -1111,4 +1261,106 @@ void BKE_library_ID_test_usages(Main *bmain, void *idv, bool *is_used_local, boo
 
 	*is_used_local = (iter.count_direct != 0);
 	*is_used_linked = (iter.count_indirect != 0);
+}
+
+/* ***** IDs usages.checking/tagging. ***** */
+static int foreach_libblock_used_linked_data_tag_clear_cb(
+        void *user_data, ID *self_id, ID **id_p, int UNUSED(cb_flag))
+{
+	bool *is_changed = user_data;
+
+	if (*id_p) {
+		/* XXX This is actually some kind of hack...
+		 * Issue is, shapekeys' 'from' ID pointer is not actually ID usage.
+		 * Maybe we should even nuke it from BKE_library_foreach_ID_link, not 100% sure yet...
+		 */
+		if ((GS(self_id->name) == ID_KE) && (((Key *)self_id)->from == *id_p)) {
+			return IDWALK_RET_NOP;
+		}
+		/* XXX another hack, for similar reasons as above one. */
+		if ((GS(self_id->name) == ID_OB) && (((Object *)self_id)->proxy_from == (Object *)*id_p)) {
+			return IDWALK_RET_NOP;
+		}
+
+		/* If checked id is used by an assumed used ID, then it is also used and not part of any linked archipelago. */
+		if (!(self_id->tag & LIB_TAG_DOIT) && ((*id_p)->tag & LIB_TAG_DOIT)) {
+			(*id_p)->tag &= ~LIB_TAG_DOIT;
+			*is_changed = true;
+		}
+	}
+
+	return IDWALK_RET_NOP;
+}
+
+/**
+ * Detect orphaned linked data blocks (i.e. linked data not used (directly or indirectly) in any way by any local data),
+ * including complex cases like 'linked archipelagoes', i.e. linked datablocks that use each other in loops,
+ * which prevents their deletion by 'basic' usage checks...
+ *
+ * \param do_init_tag if \a true, all linked data are checked, if \a false, only linked datablocks already tagged with
+ *                    LIB_TAG_DOIT are checked.
+ */
+void BKE_library_unused_linked_data_set_tag(Main *bmain, const bool do_init_tag)
+{
+	ListBase *lb_array[MAX_LIBARRAY];
+
+	if (do_init_tag) {
+		int i = set_listbasepointers(bmain, lb_array);
+
+		while (i--) {
+			for (ID *id = lb_array[i]->first; id; id = id->next) {
+				if (id->lib && (id->tag & LIB_TAG_INDIRECT) != 0) {
+					id->tag |= LIB_TAG_DOIT;
+				}
+				else {
+					id->tag &= ~LIB_TAG_DOIT;
+				}
+			}
+		}
+	}
+
+	bool do_loop = true;
+	while (do_loop) {
+		int i = set_listbasepointers(bmain, lb_array);
+		do_loop = false;
+
+		while (i--) {
+			for (ID *id = lb_array[i]->first; id; id = id->next) {
+				if (id->tag & LIB_TAG_DOIT) {
+					/* Unused ID (so far), no need to check it further. */
+					continue;
+				}
+				BKE_library_foreach_ID_link(
+				            bmain, id, foreach_libblock_used_linked_data_tag_clear_cb, &do_loop, IDWALK_READONLY);
+			}
+		}
+	}
+}
+
+/**
+ * Untag linked data blocks used by other untagged linked datablocks.
+ * Used to detect datablocks that we can forcefully make local (instead of copying them to later get rid of original):
+ * All datablocks we want to make local are tagged by caller, after this function has ran caller knows datablocks still
+ * tagged can directly be made local, since they are only used by other datablocks that will also be made fully local.
+ */
+void BKE_library_indirectly_used_data_tag_clear(Main *bmain)
+{
+	ListBase *lb_array[MAX_LIBARRAY];
+
+	bool do_loop = true;
+	while (do_loop) {
+		int i = set_listbasepointers(bmain, lb_array);
+		do_loop = false;
+
+		while (i--) {
+			for (ID *id = lb_array[i]->first; id; id = id->next) {
+				if (id->lib == NULL || id->tag & LIB_TAG_DOIT) {
+					/* Local or non-indirectly-used ID (so far), no need to check it further. */
+					continue;
+				}
+				BKE_library_foreach_ID_link(
+				            bmain, id, foreach_libblock_used_linked_data_tag_clear_cb, &do_loop, IDWALK_READONLY);
+			}
+		}
+	}
 }

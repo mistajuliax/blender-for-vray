@@ -2180,7 +2180,7 @@ static void basic_rotate(ParticleSettings *part, ParticleData *pa, float dfra, f
  * The algorithm is roughly:
  *  1. Use a BVH tree to search for faces that a particle may collide with.
  *  2. Use Newton's method to find the exact time at which the collision occurs.
- *     http://en.wikipedia.org/wiki/Newton's_method
+ *     https://en.wikipedia.org/wiki/Newton's_method
  *
  ************************************************/
 #define COLLISION_MIN_RADIUS 0.001f
@@ -4328,20 +4328,22 @@ void BKE_particlesystem_id_loop(ParticleSystem *psys, ParticleSystemIDFunc func,
 {
 	ParticleTarget *pt;
 
-	func(psys, (ID **)&psys->part, userdata, IDWALK_USER | IDWALK_NEVER_NULL);
-	func(psys, (ID **)&psys->target_ob, userdata, IDWALK_NOP);
-	func(psys, (ID **)&psys->parent, userdata, IDWALK_NOP);
+	func(psys, (ID **)&psys->part, userdata, IDWALK_CB_USER | IDWALK_CB_NEVER_NULL);
+	func(psys, (ID **)&psys->target_ob, userdata, IDWALK_CB_NOP);
+	func(psys, (ID **)&psys->parent, userdata, IDWALK_CB_NOP);
 
 	for (pt = psys->targets.first; pt; pt = pt->next) {
-		func(psys, (ID **)&pt->ob, userdata, IDWALK_NOP);
+		func(psys, (ID **)&pt->ob, userdata, IDWALK_CB_NOP);
 	}
 
-	if (psys->part->phystype == PART_PHYS_BOIDS) {
+	/* Even though psys->part should never be NULL, this can happen as an exception during deletion.
+	 * See ID_REMAP_SKIP/FORCE/FLAG_NEVER_NULL_USAGE in BKE_library_remap. */
+	if (psys->part && psys->part->phystype == PART_PHYS_BOIDS) {
 		ParticleData *pa;
 		int p;
 
 		for (p = 0, pa = psys->particles; p < psys->totpart; p++, pa++) {
-			func(psys, (ID **)&pa->boid->ground, userdata, IDWALK_NOP);
+			func(psys, (ID **)&pa->boid->ground, userdata, IDWALK_CB_NOP);
 		}
 	}
 }

@@ -27,12 +27,13 @@
 #include "blender_util.h"
 
 #include "util_debug.h"
+#include "util_string.h"
 
 CCL_NAMESPACE_BEGIN
 
 typedef map<void*, ShaderInput*> PtrInputMap;
 typedef map<void*, ShaderOutput*> PtrOutputMap;
-typedef map<std::string, ConvertNode*> ProxyMap;
+typedef map<string, ConvertNode*> ProxyMap;
 
 /* Find */
 
@@ -608,7 +609,8 @@ static ShaderNode *add_node(Scene *scene,
 			bool is_builtin = b_image.packed_file() ||
 			                  b_image.source() == BL::Image::source_GENERATED ||
 			                  b_image.source() == BL::Image::source_MOVIE ||
-			                  b_engine.is_preview();
+			                  (b_engine.is_preview() &&
+			                   b_image.source() != BL::Image::source_SEQUENCE);
 
 			if(is_builtin) {
 				/* for builtin images we're using image datablock name to find an image to
@@ -639,7 +641,8 @@ static ShaderNode *add_node(Scene *scene,
 				        image->filename.string(),
 				        image->builtin_data,
 				        get_image_interpolation(b_image_node),
-				        get_image_extension(b_image_node));
+				        get_image_extension(b_image_node),
+				        image->use_alpha);
 			}
 		}
 		image->color_space = (NodeImageColorSpace)b_image_node.color_space();
@@ -660,7 +663,8 @@ static ShaderNode *add_node(Scene *scene,
 			bool is_builtin = b_image.packed_file() ||
 			                  b_image.source() == BL::Image::source_GENERATED ||
 			                  b_image.source() == BL::Image::source_MOVIE ||
-			                  b_engine.is_preview();
+			                  (b_engine.is_preview() &&
+			                   b_image.source() != BL::Image::source_SEQUENCE);
 
 			if(is_builtin) {
 				int scene_frame = b_scene.frame_current();
@@ -685,7 +689,8 @@ static ShaderNode *add_node(Scene *scene,
 				        env->filename.string(),
 				        env->builtin_data,
 				        get_image_interpolation(b_env_node),
-				        EXTENSION_REPEAT);
+				        EXTENSION_REPEAT,
+				        env->use_alpha);
 			}
 		}
 		env->color_space = (NodeImageColorSpace)b_env_node.color_space();
@@ -822,7 +827,8 @@ static ShaderNode *add_node(Scene *scene,
 			        point_density->filename.string(),
 			        point_density->builtin_data,
 			        point_density->interpolation,
-			        EXTENSION_CLIP);
+			        EXTENSION_CLIP,
+			        true);
 		}
 		node = point_density;
 

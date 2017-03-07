@@ -154,8 +154,6 @@ Lamp *localize_lamp(Lamp *la)
 		if (lan->mtex[a]) {
 			lan->mtex[a] = MEM_mallocN(sizeof(MTex), "localize_lamp");
 			memcpy(lan->mtex[a], la->mtex[a], sizeof(MTex));
-			/* free lamp decrements */
-			id_us_plus((ID *)lan->mtex[a]->tex);
 		}
 	}
 	
@@ -176,15 +174,10 @@ void BKE_lamp_make_local(Main *bmain, Lamp *la, const bool lib_local)
 
 void BKE_lamp_free(Lamp *la)
 {
-	MTex *mtex;
 	int a;
 
 	for (a = 0; a < MAX_MTEX; a++) {
-		mtex = la->mtex[a];
-		if (mtex && mtex->tex)
-			id_us_min(&mtex->tex->id);
-		if (mtex)
-			MEM_freeN(mtex);
+		MEM_SAFE_FREE(la->mtex[a]);
 	}
 	
 	BKE_animdata_free((ID *)la, false);
@@ -195,6 +188,7 @@ void BKE_lamp_free(Lamp *la)
 	if (la->nodetree) {
 		ntreeFreeTree(la->nodetree);
 		MEM_freeN(la->nodetree);
+		la->nodetree = NULL;
 	}
 	
 	BKE_previewimg_free(&la->preview);

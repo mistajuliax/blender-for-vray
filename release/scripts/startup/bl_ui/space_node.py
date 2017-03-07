@@ -347,11 +347,7 @@ class NODE_PT_active_node_properties(Panel):
 
     @classmethod
     def poll(cls, context):
-        node     = context.active_node
-        has_draw = True
-        if context.scene.render.engine.startswith('VRAY_'):
-            has_draw = hasattr(node, "draw_buttons_ext")
-        return node and has_draw
+        return context.active_node is not None
 
     def draw(self, context):
         layout = self.layout
@@ -359,25 +355,19 @@ class NODE_PT_active_node_properties(Panel):
         # set "node" context pointer for the panel layout
         layout.context_pointer_set("node", node)
 
-        # "Draw node buttons in the sidebar"
         if hasattr(node, "draw_buttons_ext"):
             node.draw_buttons_ext(context, layout)
+        elif hasattr(node, "draw_buttons"):
+            node.draw_buttons(context, layout)
 
-        # This doesn't correspond the docs only 'draw_buttons_ext'
-        # is drawing on sidebar
-        #elif hasattr(node, "draw_buttons"):
-        #    node.draw_buttons(context, layout)
-
-        # I'm drawing my sockets stuff manually
-        if not context.scene.render.engine.startswith('VRAY_'):
-            # XXX this could be filtered further to exclude socket types which don't have meaningful input values (e.g. cycles shader)
-            value_inputs = [socket for socket in node.inputs if socket.enabled and not socket.is_linked]
-            if value_inputs:
-                layout.separator()
-                layout.label("Inputs:")
-                for socket in value_inputs:
-                    row = layout.row()
-                    socket.draw(context, row, node, socket.name)
+        # XXX this could be filtered further to exclude socket types which don't have meaningful input values (e.g. cycles shader)
+        value_inputs = [socket for socket in node.inputs if socket.enabled and not socket.is_linked]
+        if value_inputs:
+            layout.separator()
+            layout.label("Inputs:")
+            for socket in value_inputs:
+                row = layout.row()
+                socket.draw(context, row, node, iface_(socket.name, socket.bl_rna.translation_context))
 
 
 # Node Backdrop options
@@ -444,10 +434,7 @@ class NODE_PT_quality(bpy.types.Panel):
 class NODE_UL_interface_sockets(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         socket = item
-
-        color = (1.0,1.0,1.0,1.0)
-        if hasattr(socket, 'draw_color'):
-            color = socket.draw_color(context)
+        color = socket.draw_color(context)
 
         if self.layout_type in {'DEFAULT', 'COMPACT'}:
             row = layout.row(align=True)
