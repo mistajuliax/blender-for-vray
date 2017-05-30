@@ -364,7 +364,7 @@ void ProductionExporter::render_end()
 
 	std::lock_guard<PythonGIL> pLock(m_pyGIL);
 	for (auto & result : m_renderResultsList) {
-		m_engine.end_result(result, false, true);
+		m_engine.end_result(result, false, true, true);
 	}
 }
 
@@ -404,11 +404,11 @@ void ProductionExporter::cb_on_bucket_ready(const VRayBaseTypes::AttrImage & img
 		for (int c = 0; c < result.layers.length(); ++c) {
 			for (int r = 0; r < result.layers[c].passes.length(); ++r) {
 				auto pass = result.layers[c].passes[r];
-				if (pass.type() == BL::RenderPass::type_COMBINED) {
+				/*if (pass.type() == BL::RenderPass::type_COMBINED) {
 					auto * bPass = reinterpret_cast<RenderPass*>(pass.ptr.data);
 					RenderImage::updateImageRegion(bPass->rect, bPass->rectx, bPass->recty, img.x, img.y, reinterpret_cast<const float *>(img.data.get()), img.width, img.height, bPass->channels);
 					break;
-				}
+				}*/
 			}
 		}
 	}
@@ -434,7 +434,7 @@ void ProductionExporter::cb_on_rt_image_updated()
 				for (renderLayer.passes.begin(rpIt); rpIt != renderLayer.passes.end(); ++rpIt) {
 					BL::RenderPass renderPass(*rpIt);
 					if (renderPass) {
-						RenderImage image = m_exporter->get_pass(renderPass.type());
+						/*RenderImage image = m_exporter->get_pass(renderPass.type());
 
 						if (image && image.w == m_viewParams.renderSize.w && image.h == m_viewParams.renderSize.h) {
 							auto resx = result.resolution_x();
@@ -445,7 +445,7 @@ void ProductionExporter::cb_on_rt_image_updated()
 							}
 
 							renderPass.rect(image.pixels);
-						}
+						}*/
 					}
 				}
 
