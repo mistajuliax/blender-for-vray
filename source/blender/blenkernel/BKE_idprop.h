@@ -81,19 +81,6 @@ void IDP_FreeString(struct IDProperty *prop) ATTR_NONNULL();
 
 /*-------- ID Type -------*/
 
-/* Initialises the ID Property system */
-void IDP_init(void);
-/* Shuts down the ID Property system and frees memory */
-void IDP_exit(void);
-/* Restores LIB_FAKEUSER flag after append */
-void IDP_restore_fake_user(void);
-bool IDP_is_ID_used(const ID *id);
-
-typedef void(*IDPWalkFunc)(void *userData, IDProperty *idp);
-/* Calls a function on each IDProperty which references the given ID */
-void IDP_foreachIDLink(const ID *id, IDPWalkFunc walk, void *userData);
-
-typedef void(*IDPWalkFunc)(void *userData, IDProperty *idp);
 
 /*-------- Group Functions -------*/
 

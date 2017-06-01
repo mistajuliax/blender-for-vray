@@ -744,6 +744,31 @@ void BKE_libblock_free_ex(Main *bmain, void *idv, const bool do_id_user, const b
 	ID *id = idv;
 	short type = GS(id->name);
 	ListBase *lb = which_libbase(bmain, type);
+	int listIndex = 0;
+	char vrayFakeTexturePrefix[] = ".VRayFakeTexture@";
+
+	if (type == ID_TE) {
+		// texture is special case because it is freed before ntree and ntree can reference it
+		// so if the current ID is texture and it is in the list - delete it only if it has user count 0
+		// otherwise it is used by some ntree's node and will be deleted from IDP_FreeProperty_ex
+		listIndex = BLI_findindex(lb, id);
+
+		if (listIndex != -1 && 0 == strncmp(vrayFakeTexturePrefix, id->name + 2, sizeof(vrayFakeTexturePrefix) - 1) && id->us > ID_FAKE_USERS(id)) {
+			struct IDProperty * props = IDP_GetProperties(id, true);
+			IDPropertyTemplate idpTemplate;
+			idpTemplate.id = (ID*)bmain;
+			struct IDProperty * mainProp = IDP_New(IDP_ID, &idpTemplate, "_vray_bmain");
+			IDP_AddToGroup(props, mainProp);
+
+			id_us_min(id);
+
+			// remove from list, since when deleting main, the code cycles trough list untill it is empty
+			BKE_main_lock(bmain);
+			BLI_remlink(lb, id);
+			BKE_main_unlock(bmain);
+			return;
+		}
+	}
 
 	DAG_id_type_tag(bmain, type);
 
@@ -873,8 +898,10 @@ void BKE_libblock_free_ex(Main *bmain, void *idv, const bool do_id_user, const b
 			remap_editor_id_reference_cb(id, NULL);
 		}
 	}
-
-	BLI_remlink(lb, id);
+	// textures are handled specially since they can be referenced by ntrees
+	if (listIndex != -1) {
+		BLI_remlink(lb, id);
+	}
 
 	BKE_libblock_free_data(bmain, id, do_id_user);
 	BKE_main_unlock(bmain);

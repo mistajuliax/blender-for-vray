@@ -2157,10 +2157,6 @@ static void _IDP_DirectLinkGroup_OrFree(IDProperty **prop, int switch_endian, Fi
 	}
 }
 
-extern void IDP_ID_Register(IDProperty *prop);
-extern void IDP_ID_Unregister(IDProperty *prop);
-
-
 void IDP_ID_Tag(IDProperty * prop, short tag, bool set)
 {
 	IDProperty *loop, *idp_array;
@@ -2195,6 +2191,36 @@ void IDP_ID_Tag(IDProperty * prop, short tag, bool set)
 	}
 }
 
+static void IDP_ID_FakeUserSet(IDProperty *prop)
+{
+	return;
+	if (!prop) return;
+	switch (prop->type) {
+		case IDP_ID: /* PointerProperty */
+		{
+			id_fake_user_clear(IDP_Id(prop));
+			break;
+		}
+		case IDP_IDPARRAY: /* CollectionProperty */
+		{
+			IDProperty *idp_array = IDP_IDPArray(prop);
+			for (int i = 0; i < prop->len; i++) {
+				IDP_ID_FakeUserSet(&(idp_array[i]));
+			}
+			break;
+		}
+		case IDP_GROUP: /* PointerProperty */
+		{
+			for (IDProperty *loop = prop->data.group.first; loop; loop = loop->next) {
+				IDP_ID_FakeUserSet(loop);
+			}
+			break;
+		}
+		default:
+			break;  /* Nothing to do for other IDProps. */
+	}
+}
+
 static void IDP_LibLinkProperty(IDProperty *prop, FileData *fd)
 {
 	if (!prop)
@@ -2208,6 +2234,9 @@ static void IDP_LibLinkProperty(IDProperty *prop, FileData *fd)
 				printf("Error while loading \"%s\". Data not found in file!\n", prop->name);
 			}
 			prop->data.pointer = newaddr;
+			if (IDP_Id(prop) && ID_FAKE_USERS(IDP_Id(prop))) {
+				id_fake_user_clear(IDP_Id(prop));
+			}
 			break;
 		}
 		case IDP_IDPARRAY: /* CollectionProperty */
@@ -8568,25 +8597,8 @@ static void do_versions_after_linking(Main *main)
 
 static void lib_link_all(FileData *fd, Main *main)
 {
-	ListBase *lbarray[MAX_LIBARRAY];
-	int i;
-
 	oldnewmap_sort(fd);
 
-	//i = set_listbasepointers(main, lbarray);
-	//while (i--) {
-	//	ID *loop = lbarray[i]->first;
-
-	//	if (lbarray[i] == &main->nodetree)
-	//		continue; /* Since nodetrees aren't all in main, they do their own id-prop linking */
-
-	//	while (loop) {
-	//		if (loop->tag & LIB_TAG_NEED_LINK) /* Don't unset yet! */
-	//			IDP_LibLinkProperty(loop->properties, fd);
-	//		loop = loop->next;
-	//	}
-	//}
-	
 	/* No load UI for undo memfiles */
 	if (fd->memfile == NULL) {
 		lib_link_windowmanager(fd, main);
@@ -8626,7 +8638,6 @@ static void lib_link_all(FileData *fd, Main *main)
 	lib_link_cachefiles(fd, main);
 
 	lib_link_library(fd, main);    /* only init users */
-	IDP_restore_fake_user();
 }
 
 static void direct_link_keymapitem(FileData *fd, wmKeyMapItem *kmi)
@@ -10772,5 +10783,5 @@ struct Main *BLO_load_main_from_file(const char *filepath)
 
 void BLO_verify_custom_data(struct Main *bmain)
 {
-	IDP_restore_fake_user();
+
 }

@@ -357,7 +357,6 @@ int main(
 
 	BKE_blender_globals_init();  /* blender.c */
 
-	IDP_init();
 	IMB_init();
 	BKE_cachefiles_init();
 	BKE_images_init();

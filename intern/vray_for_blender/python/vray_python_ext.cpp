@@ -655,7 +655,7 @@ static PyObject* mIsIDUsedInIDProp(PyObject *self, PyObject *args)
 	}
 
 	ID *id = (ID*)PyLong_AsVoidPtr(py_object);
-	if (id && IDP_is_ID_used(id)) {
+	if (id) {
 		Py_RETURN_TRUE;
 	}
 

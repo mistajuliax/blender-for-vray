@@ -483,7 +483,7 @@ void SceneExporter::sync_prepass()
 		BL::NodeTree ntree(*nIt);
 		bNodeTree *_ntree = (bNodeTree*)ntree.ptr.data;
 
-		if (IDP_is_ID_used((ID*)_ntree)) {
+		if (_ntree) {
 			if (boost::starts_with(ntree.bl_idname(), "VRayNodeTree")) {
 				// NOTE: On scene save node links are not properly updated for some
 				// reason; simply manually update everything...

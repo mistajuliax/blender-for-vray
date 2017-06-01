@@ -44,6 +44,7 @@
 #include "MEM_guardedalloc.h"
 
 #include "BLI_strict_flags.h"
+#include "BKE_main.h"
 
 /* IDPropertyTemplate is a union in DNA_ID.h */
 
@@ -145,12 +146,13 @@ void IDP_SetIndexArray(IDProperty *prop, int index, IDProperty *item)
 		return;
 
 	old = GETPROP(prop, index);
-
 	if (item != old) {
 		IDP_FreeProperty(old);
+		if (prop->type == IDP_ID) {
+			id_us_plus(IDP_Id(prop));
+		}
 
 		memcpy(old, item, sizeof(IDProperty));
-	 	IDP_ID_Register(prop);
 	}
 }
 
@@ -456,183 +458,8 @@ static IDProperty *IDP_CopyID(const IDProperty *prop)
 
 	newp->data.pointer = prop->data.pointer;
 	id_us_plus(IDP_Id(newp));
-	IDP_ID_Register(newp);
 
 	return newp;
-}
-
-static GHash *IDP_IDHashTable = NULL;
-static SpinLock HashTableLock;
-
-static void free_idhash_value(void *val)
-{
-	BLI_ghash_free(val, NULL, NULL);
-}
-
-void IDP_init(void)
-{
-	IDP_IDHashTable = BLI_ghash_new(BLI_ghashutil_ptrhash, BLI_ghashutil_ptrcmp, __func__);
-	BLI_spin_init(&HashTableLock);
-}
-void IDP_exit(void)
-{
-	BLI_spin_lock(&HashTableLock);
-
-	BLI_ghash_free(IDP_IDHashTable, NULL, free_idhash_value);
-	IDP_IDHashTable = NULL;
-
-	BLI_spin_unlock(&HashTableLock);
-
-	BLI_spin_end(&HashTableLock);
-}
-
-void IDP_restore_fake_user(void)
-{
-	GHashIterator ghi;
-
-	BLI_spin_lock(&HashTableLock);
-
-	for (BLI_ghashIterator_init(&ghi, IDP_IDHashTable); !BLI_ghashIterator_done(&ghi); BLI_ghashIterator_step(&ghi)) {
-		id_fake_user_set((ID*)BLI_ghashIterator_getKey(&ghi));
-	}
-
-	BLI_spin_unlock(&HashTableLock);
-	BLI_spin_end(&HashTableLock);
-}
-
-bool IDP_is_ID_used(const ID *id)
-{
-	bool used = false;
-	GHashIterator ghi;
-
-	BLI_spin_lock(&HashTableLock);
-
-	BLI_ghashIterator_init(&ghi, IDP_IDHashTable);
-	for (; !BLI_ghashIterator_done(&ghi); BLI_ghashIterator_step(&ghi)) {
-		ID *data = (ID*)BLI_ghashIterator_getKey(&ghi);
-		if (data) {
-			if (id == data) {
-				used = true;
-				break;
-			}
-		}
-	}
-
-	BLI_spin_unlock(&HashTableLock);
-	BLI_spin_end(&HashTableLock);
-
-	return used;
-}
-
-static GHash *find_or_create_reflist(ID *id)
-{
-	GHash *reflist = BLI_ghash_lookup(IDP_IDHashTable, id);
-	if (!reflist) {
-		reflist = BLI_ghash_new(BLI_ghashutil_ptrhash, BLI_ghashutil_ptrcmp, __func__);
-		BLI_ghash_insert(IDP_IDHashTable, id, reflist);
-	}
-	return reflist;
-}
-
-void IDP_ID_Register(IDProperty *prop)
-{
-	GHash *reflist;
-	ID *id;
-	int i;
-
-	switch (prop->type)
-	{
-	case IDP_ID:
-		id = IDP_Id(prop);
-		if (!id) break;
-
-		BLI_spin_trylock(&HashTableLock);
-
-		reflist = find_or_create_reflist(id);
-		BLI_ghash_insert(reflist, prop, prop);
-
-		BLI_spin_unlock(&HashTableLock);
-		break;
-	case IDP_IDPARRAY:
-		BLI_spin_trylock(&HashTableLock);
-
-		for (i = 0; i < prop->totallen; i++) {
-			IDProperty *inner = GETPROP(prop, i);
-			if (inner->type != IDP_ID) continue;
-
-			reflist = find_or_create_reflist(IDP_Id(inner));
-			BLI_ghash_insert(reflist, inner, inner);
-		}
-
-		BLI_spin_unlock(&HashTableLock);
-		break;
-	}
-}
-
-static void IDP_ID_RemoveFromHash(IDProperty *prop)
-{
-	ID *id = IDP_Id(prop);
-
-	GHash *reflist = BLI_ghash_lookup(IDP_IDHashTable, id);
-	if (reflist) {
-		BLI_ghash_remove(reflist, prop, NULL, NULL);
-
-		if (BLI_ghash_size(reflist) == 0) {
-			BLI_ghash_remove(IDP_IDHashTable, id, NULL, NULL);
-			BLI_ghash_free(reflist, NULL, NULL);
-		}
-	}
-}
-
-void IDP_ID_Unregister(IDProperty *prop)
-{
-	int i;
-
-	switch(prop->type) {
-	case IDP_ID:
-		if (IDP_Id(prop)) {
-			BLI_spin_trylock(&HashTableLock);
-
-			IDP_ID_RemoveFromHash(prop);
-
-			BLI_spin_unlock(&HashTableLock);
-		}
-		break;
-	case IDP_IDPARRAY:
-		BLI_spin_trylock(&HashTableLock);
-
-		for (i = 0; i < prop->totallen; i++) {
-			IDProperty *inner = GETPROP(prop, i);
-			if (inner->type != IDP_ID)
-				continue;
-
-			IDP_ID_RemoveFromHash(inner);
-		}
-
-		BLI_spin_unlock(&HashTableLock);
-	}
-}
-
-void IDP_foreachIDLink(const ID *id, IDPWalkFunc walk, void *userData)
-{
-	GHash *users;
-
-	BLI_spin_lock(&HashTableLock);
-
-	users = BLI_ghash_lookup(IDP_IDHashTable, id);
-	if (users) {
-		GHashIterator *iter;
-		IDProperty *idprop;
-		iter = BLI_ghashIterator_new(users);
-		while (!BLI_ghashIterator_done(iter)) {
-			idprop = BLI_ghashIterator_getValue(iter);
-			BLI_ghashIterator_step(iter);
-
-			walk(userData, idprop);
-		}
-		BLI_ghashIterator_free(iter);
-	}
-	BLI_spin_unlock(&HashTableLock);
 }
 
 /** \} */
@@ -1013,7 +840,6 @@ void IDP_UnlinkProperty(IDProperty *prop)
 
 	switch (prop->type) {
 	case IDP_ID:
-		IDP_ID_Unregister(prop);
 		prop->data.pointer = NULL;
 		break;
 	case IDP_IDPARRAY:
@@ -1257,7 +1083,6 @@ IDProperty *IDP_New(const char type, const IDPropertyTemplate *val, const char *
 			prop->data.pointer = (void *)val->id;
 			prop->type = IDP_ID;
 			id_us_plus(IDP_Id(prop));
-			IDP_ID_Register(prop);
 			break;
 		}
 		default:
@@ -1294,9 +1119,19 @@ void IDP_FreeProperty_ex(IDProperty *prop, const bool do_id_user)
 			break;
 		case IDP_ID:
 			if (do_id_user) {
-				id_us_min(IDP_Id(prop));
+				if (IDP_Id(prop)->us > ID_FAKE_USERS(IDP_Id(prop))) {
+					id_us_min(IDP_Id(prop));
+				}
+				if (IDP_Id(prop)->us == ID_FAKE_USERS(IDP_Id(prop)) && GS(IDP_Id(prop)->name) == ID_TE) {
+					IDProperty * mainProp = IDP_GetPropertyFromGroup(IDP_Id(prop)->properties, "_vray_bmain");
+					if (mainProp && IDP_Id(mainProp)) {
+						BLI_assert(mainProp->type == IDP_ID && "Vray Fake texture has \"_vray_bmain\" property with wrong type!");
+						// this is put here by BKE_libblock_free_ex
+						Main * main = (Main*)IDP_Id(mainProp);
+						BKE_libblock_free_ex(main, IDP_Id(prop), false, false);
+					}
+				}
 			}
-			IDP_ID_Unregister(prop);
 			break;
 	}
 }

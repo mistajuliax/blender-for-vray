@@ -4106,11 +4106,6 @@ bool BLO_write_file(
 		}
 	}
 
-	/* restore fake user flag for ID properties              */
-	/* flag user could be reseted when append/copy/paste etc */
-	/* without this ID properties' data will be wiped out    */
-	IDP_restore_fake_user();
-
 	if (write_flags & G_FILE_RELATIVE_REMAP) {
 		/* note, making relative to something OTHER then G.main->name */
 		BKE_bpath_relative_convert(mainvar, filepath, NULL);
