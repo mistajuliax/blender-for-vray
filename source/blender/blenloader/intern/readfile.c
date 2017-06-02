@@ -2191,36 +2191,6 @@ void IDP_ID_Tag(IDProperty * prop, short tag, bool set)
 	}
 }
 
-static void IDP_ID_FakeUserSet(IDProperty *prop)
-{
-	return;
-	if (!prop) return;
-	switch (prop->type) {
-		case IDP_ID: /* PointerProperty */
-		{
-			id_fake_user_clear(IDP_Id(prop));
-			break;
-		}
-		case IDP_IDPARRAY: /* CollectionProperty */
-		{
-			IDProperty *idp_array = IDP_IDPArray(prop);
-			for (int i = 0; i < prop->len; i++) {
-				IDP_ID_FakeUserSet(&(idp_array[i]));
-			}
-			break;
-		}
-		case IDP_GROUP: /* PointerProperty */
-		{
-			for (IDProperty *loop = prop->data.group.first; loop; loop = loop->next) {
-				IDP_ID_FakeUserSet(loop);
-			}
-			break;
-		}
-		default:
-			break;  /* Nothing to do for other IDProps. */
-	}
-}
-
 static void IDP_LibLinkProperty(IDProperty *prop, FileData *fd)
 {
 	if (!prop)
