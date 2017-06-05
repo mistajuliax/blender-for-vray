@@ -178,6 +178,7 @@ void id_lib_extern(ID *id)
  *       to make this change... */
 void id_us_ensure_real(ID *id)
 {
+	// TODO: what happens with IDP_ID properties when this "fake" real user is set?
 	if (id) {
 		const int limit = ID_FAKE_USERS(id);
 		id->tag |= LIB_TAG_EXTRAUSER;
