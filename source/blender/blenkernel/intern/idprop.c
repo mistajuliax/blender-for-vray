@@ -1118,7 +1118,7 @@ void IDP_FreeProperty_ex(IDProperty *prop, const bool do_id_user)
 			IDP_FreeIDPArray(prop, do_id_user);
 			break;
 		case IDP_ID:
-			if (do_id_user) {
+			if (do_id_user && IDP_Id(prop)) {
 				if (IDP_Id(prop)->us > ID_FAKE_USERS(IDP_Id(prop))) {
 					id_us_min(IDP_Id(prop));
 				}
